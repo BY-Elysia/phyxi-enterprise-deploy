@@ -9,7 +9,10 @@ a=backend.read_text().strip();b=client.read_text().strip()
 for name,value in {'client-keys.map':'"Bearer '+b+'" "cad-ws-01";\n',
                    'upstream-auth.conf':'proxy_set_header Authorization "Bearer '+a+'";\n'}.items():
     f=p/name
-    if f.exists() and f.read_text()!=value:raise SystemExit('Existing mapping differs: '+name)
+    if f.exists():
+        existing=f.read_text()
+        valid=value.strip() in {line.strip() for line in existing.splitlines()} if name=='client-keys.map' else existing==value
+        if not valid:raise SystemExit('Existing mapping differs: '+name)
     if not f.exists():f.write_text(value)
     os.chown(f,101,101);f.chmod(0o400)
 os.chown(backend,10001,10001);backend.chmod(0o400)

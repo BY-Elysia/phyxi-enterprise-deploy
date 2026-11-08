@@ -56,7 +56,7 @@ tests/                              本地静态和隔离测试；不调用 GPU
 - **多模态**：Python 前端、`tokenizer-mode=auto`；H20 上采用 BF16 KV。
 - **资源**：TP=8，初始上下文 65,536 token，`max-num-seqs=16`，每卡显存预算 0.85。这些是配置初值，不是容量保证。
 - **服务**：仅 Nginx 在企业内网 IP:443 发布；模型 8000 不映射宿主机；Prometheus 9090 只监听服务器回环。
-- **存储**：默认 `/srv/phyxi`，首次部署可在 Notebook 的 `data_root` 修改为已挂载的专用数据卷；生成的配置路径同步替换。已部署的 Docker 数据目录不能当作普通参数直接迁移。
+- **存储**：默认 `/srv/phyxi`，首次部署可在 Notebook 的 `data_root` 修改为已挂载的专用数据卷；生成的配置路径同步替换。已部署的 Docker 数据目录不能当作普通参数直接迁移。版本、资源参数的变更与生效顺序已写在 Notebook 第 10 节，全部通过单元格完成。
 - **思考**：使用 GLM 支持的 `reasoning_effort=low`；仍可能生成思考 token。TPS 按 API 实际 completion_tokens 统计，包含思考。
 
 [参数说明](docs/parameters.md) · [架构流程](docs/architecture.md) · [Windows 接入](docs/workstation.md) · [运维与回滚](docs/operations.md) · [官方依据](docs/sources.md)

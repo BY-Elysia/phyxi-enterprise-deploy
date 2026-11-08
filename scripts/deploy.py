@@ -24,12 +24,17 @@ def sha(p):
     return h.hexdigest()
 
 def validate(c, require_gpus=False):
+    expected=set(load(REPO/'deployment/config.example.json'))
+    assert set(c)==expected, f'Unknown or missing settings: {set(c)^expected}'
+    for key in ['data_root','domain','intranet_ip','release','tls_mode','tls_chain_source','tls_ca_source','alertmanager','docker_version','toolkit_version','model_revision','vllm_image','nginx_image','prometheus_image','reasoning_effort']:assert isinstance(c[key],str),key
+    for key in ['allowed_cidrs','gpu_uuids','benchmark_concurrency']:assert isinstance(c[key],list),key
+    for key in ['tls_chain_source','tls_ca_source']:assert Path(c[key]).is_absolute(),key
     root=Path(c['data_root']);assert root.is_absolute() and len(root.parts)>=3 and '..' not in root.parts and re.fullmatch(r'/[A-Za-z0-9_/-]+',str(root)), 'Use an absolute dedicated data mount, e.g. /srv/phyxi'
-    assert c['driver_branch']>=580 and isinstance(c['driver_branch'],int)
+    assert type(c['driver_branch']) is int and c['driver_branch']>=580
     assert re.fullmatch(r'[a-f0-9]{40}',c['model_revision'])
     assert re.fullmatch(r'[A-Za-z0-9./:_-]+@sha256:[a-f0-9]{64}',c['vllm_image']), 'vLLM must be pinned by digest'
     for image in [c['nginx_image'],c['prometheus_image']]:assert re.fullmatch(r'[A-Za-z0-9./:@_-]+',image)
-    for key in ['model_cpus','model_memory_gib','shm_gib','max_num_batched_tokens','max_images','per_client_connections','total_connections','benchmark_requests','benchmark_max_tokens','verify_max_tokens']:assert isinstance(c[key],int) and c[key]>0,key
+    for key in ['model_cpus','model_memory_gib','shm_gib','max_num_batched_tokens','max_images','per_client_connections','total_connections','benchmark_requests','benchmark_max_tokens','verify_max_tokens']:assert type(c[key]) is int and c[key]>0,key
     assert c['per_client_connections']<=c['total_connections']
     assert c['benchmark_concurrency'] and all(isinstance(n,int) and n>0 for n in c['benchmark_concurrency'])
     assert c['reasoning_effort'] in ['low','high','max']
@@ -41,8 +46,8 @@ def validate(c, require_gpus=False):
     ids=c['gpu_uuids'];assert len(ids)==len(set(ids))
     for u in ids:assert re.fullmatch(r'GPU-[a-fA-F0-9-]{36}',u)
     if require_gpus:assert len(ids)==8,'GLM FP8 baseline requires eight explicit GPU UUIDs'
-    assert 4096<=c['max_model_len']<=1048576
-    assert 1<=c['max_num_seqs']<=128
+    assert type(c['max_model_len']) is int and 4096<=c['max_model_len']<=1048576
+    assert type(c['max_num_seqs']) is int and 1<=c['max_num_seqs']<=128
     assert 0.5<=c['gpu_memory_utilization']<=0.95
     assert re.fullmatch(r'[a-zA-Z0-9_-]+',c['release'])
     assert c['tls_mode'] in ['enterprise','self-signed']
@@ -74,7 +79,25 @@ def no_foreign_docker():
         x=json.loads(run(DOCKER+['inspect',cid],capture=True))[0]
         assert x['Config'].get('Labels',{}).get('com.docker.compose.project')=='phyxi-enterprise','Foreign containers: use a dedicated server'
 
-def mounted():assert os.path.ismount(ROOT),'Mount the prepared data volume at /srv/phyxi first; notebook does not format disks'
+def mounted():assert os.path.ismount(ROOT),f'Mount the prepared data volume at {ROOT} first; notebook does not format disks'
+
+# Request-only test inputs and certificate import paths do not require model recreation.
+REQUEST_ONLY={'benchmark_concurrency','benchmark_requests','benchmark_max_tokens','verify_max_tokens','tls_chain_source','tls_ca_source'}
+def deployment_inputs(c):return {k:v for k,v in c.items() if k not in REQUEST_ONLY}
+
+def ensure_stopped():
+    if not shutil.which('docker'):return
+    # Do not silently ignore an unavailable existing Docker daemon.
+    active=run(DOCKER+['ps','-q','--filter','label=com.docker.compose.project=phyxi-enterprise'],capture=True).strip()
+    assert not active,'Stop the deployment with Notebook stage("stop") before changing prepared configuration'
+
+def prepared(c):
+    saved=ROOT/'current/deployment-config.json'
+    assert saved.exists(),'Run the render stage first'
+    assert deployment_inputs(load(saved))==deployment_inputs(c),'Notebook values differ from prepared release; stop, select a new release if already started, then rerun affected preparation stages and render'
+
+def package_version(name):return run(['dpkg-query','-W','-f=${Version}',name],capture=True).strip()
+
 
 def preflight(c):
     host();mounted();no_foreign_docker()
@@ -82,6 +105,7 @@ def preflight(c):
     mem=int(next(x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemTotal:')))/1024**2
     assert mem>=max(600,c['model_memory_gib']+64),'At least 600 GiB host RAM required for this baseline (recommend >=768 GiB)'
     assert shutil.disk_usage(ROOT).free>=600*1024**3,'At least 600 GiB free data space required for initial preparation'
+    assert (os.cpu_count() or 0)>=c['model_cpus'],'Requested model CPU quota exceeds host logical CPUs'
     run(['df','-h',ROOT]);run(['lscpu'])
     if shutil.which('nvidia-smi'):
         run(['nvidia-smi','--query-gpu=index,uuid,name,memory.total','--format=csv'])
@@ -90,7 +114,9 @@ def preflight(c):
 def base(c):
     mounted();run(['apt-get','update'])
     run(['apt-get','install','-y','ca-certificates','curl','gnupg','python3','python3-venv','jq','openssl','pciutils','openssh-server','tar','util-linux','linux-headers-'+platform.release()])
-    for d in ['docker','containerd','models','cache','prometheus','secrets','artifacts','evidence','releases','download-cache']:(ROOT/d).mkdir(parents=True,exist_ok=True);(ROOT/d).chmod(0o755)
+    for d in ['docker','containerd','models','cache','prometheus','secrets','artifacts','evidence','releases','download-cache']:
+        folder=ROOT/d
+        if not folder.exists():folder.mkdir(parents=True,mode=0o755);folder.chmod(0o755)
     run(['timedatectl','set-ntp','true']);run(['systemctl','enable','--now','ssh'])
 
 def driver(c):
@@ -113,7 +139,13 @@ def docker(c):
     assert not daemon.exists() or load(daemon).get('data-root')==str(ROOT/'docker'),'Existing custom Docker daemon.json; inspect before installation'
     if (ROOT/'artifacts/docker-managed.json').exists():
         actual=run(DOCKER+['info','--format','{{.DockerRootDir}}'],capture=True).strip()
-        assert actual==str(ROOT/'docker');run(DOCKER+['compose','version']);return
+        assert actual==str(ROOT/'docker')
+        wanted=c['docker_version']
+        if wanted and package_version('docker-ce')!=wanted:
+            ensure_stopped();run(['apt-get','update'])
+            run(['apt-get','install','-y','--allow-change-held-packages','docker-ce='+wanted,'docker-ce-cli='+wanted])
+        save(ROOT/'artifacts/docker-managed.json',{'version':package_version('docker-ce'),'data_root':actual})
+        run(DOCKER+['compose','version']);return
     if shutil.which('docker'):
         for args in [['ps','-aq'],['image','ls','-q'],['volume','ls','-q']]:
             x=subprocess.run(DOCKER+args,text=True,capture_output=True)
@@ -141,34 +173,42 @@ def docker(c):
 def toolkit(c):
     no_foreign_docker()
     marker=ROOT/'artifacts/toolkit-managed.json'
-    if marker.exists():run(['nvidia-ctk','--version']);return
+    if marker.exists() and package_version('nvidia-container-toolkit')==c['toolkit_version']:
+        run(['nvidia-ctk','--version']);return
+    ensure_stopped()
     run(['curl','-fsSL','https://nvidia.github.io/libnvidia-container/gpgkey','-o',ROOT/'artifacts/nvidia-toolkit.asc'])
     run(['gpg','--batch','--yes','--dearmor','-o','/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg',ROOT/'artifacts/nvidia-toolkit.asc'])
+    Path('/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg').chmod(0o644)
     listing=run(['curl','-fsSL','https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list'],capture=True)
     write('/etc/apt/sources.list.d/nvidia-container-toolkit.list',listing.replace('deb https://','deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://'))
     run(['apt-get','update']);v=c['toolkit_version']
     packages=['nvidia-container-toolkit','nvidia-container-toolkit-base','libnvidia-container-tools','libnvidia-container1']
-    run(['apt-get','install','-y']+[x+'='+v for x in packages]);run(['nvidia-ctk','runtime','configure','--runtime=docker']);run(['systemctl','restart','docker'])
+    run(['apt-get','install','-y','--allow-change-held-packages']+[x+'='+v for x in packages]);run(['nvidia-ctk','runtime','configure','--runtime=docker']);run(['systemctl','restart','docker'])
     run(['apt-mark','hold','docker-ce','docker-ce-cli','containerd.io','docker-buildx-plugin','docker-compose-plugin']+packages)
     save(marker,{'version':v})
 
 def images(c):
-    lock=load(REPO/'deployment/versions.json');lock['vllm_image']=c['vllm_image'];p=ROOT/'artifacts/images.json'
-    if p.exists():
-        assert load(p)['vllm']==lock['vllm_image'],'Version lock changed; use a new validated release';refs=load(p)
-    else:refs={'vllm':lock['vllm_image'],'nginx':c['nginx_image'],'prometheus':c['prometheus_image']}
+    wanted={'vllm':c['vllm_image'],'nginx':c['nginx_image'],'prometheus':c['prometheus_image']}
+    p=ROOT/'artifacts/images.json';source=ROOT/'artifacts/image-inputs.json'
+    if p.exists() and source.exists() and load(source)==wanted:
+        refs=load(p)  # Same tags retain their previously resolved digest.
+    else:
+        ensure_stopped();refs=wanted.copy()
     for k,v in refs.items():
         run(DOCKER+['pull','--platform','linux/amd64',v])
         if '@sha256:' not in v:refs[k]=json.loads(run(DOCKER+['image','inspect',v],capture=True))[0]['RepoDigests'][0]
-    save(p,refs)
+    save(p,refs);save(source,wanted)
     # Run package/architecture/parser check without GPU allocation.
     result=run(DOCKER+['run','--rm','-e','VLLM_USE_RUST_FRONTEND=0','-v',str(REPO/'deployment/check-image.py')+':/check.py:ro','--entrypoint','python3',refs['vllm'],'/check.py'],capture=True)
     write(ROOT/'artifacts/image-compatibility.json',result)
     helptext=run(DOCKER+['run','--rm','-e','VLLM_USE_RUST_FRONTEND=0','--entrypoint','vllm',refs['vllm'],'serve','--help=all'],capture=True)
     for flag in ['--disable-flashinfer-autotune','--reasoning-parser','--default-chat-template-kwargs','--enable-prefix-caching']:assert flag in helptext,flag
     write(ROOT/'artifacts/vllm-serve-help.txt',helptext)
+    save(ROOT/'artifacts/image-check-passed.json',{'vllm':refs['vllm']})
 
 def model(c):
+    manifest=ROOT/'artifacts/model.json'
+    if manifest.exists() and load(manifest)['revision']!=c['model_revision']:ensure_stopped()
     lock=load(REPO/'deployment/versions.json')
     lock['model_revision']=c['model_revision']
     save(ROOT/'artifacts/model-download-lock.json',lock)
@@ -178,10 +218,18 @@ def model(c):
     run([ROOT/'tools-hf/bin/python',REPO/'scripts/download-model.py','--root',ROOT,'--lock',ROOT/'artifacts/model-download-lock.json'])
 
 def render(c, destination=None):
-    validate(c,True);release=Path(destination) if destination else ROOT/'releases'/c['release'];release.mkdir(parents=True,exist_ok=True);release.chmod(0o755)
+    validate(c,True);release=Path(destination) if destination else ROOT/'releases'/c['release']
     refs=load(ROOT/'artifacts/images.json');modelinfo=load(ROOT/'artifacts/model.json')
-    if not destination and (ROOT/'artifacts/deployment-config.json').exists():
-        assert load(ROOT/'artifacts/deployment-config.json')==c,'Configuration changed: prepare a new release using docs/operations.md, do not overwrite the active release'
+    if not destination:
+        assert modelinfo['revision']==c['model_revision'],'Model revision changed: rerun model stage'
+        wanted={'vllm':c['vllm_image'],'nginx':c['nginx_image'],'prometheus':c['prometheus_image']}
+        assert load(ROOT/'artifacts/image-inputs.json')==wanted,'Image inputs changed: rerun images stage'
+        assert load(ROOT/'artifacts/image-check-passed.json')['vllm']==refs['vllm'],'Image compatibility check has not passed'
+        snapshot=release/'deployment-config.json'
+        if snapshot.exists() and (release/'started.json').exists():
+            assert deployment_inputs(load(snapshot))==deployment_inputs(c),'Previously started release is immutable: choose a new release in Notebook cell 1'
+        ensure_stopped()
+    release.mkdir(parents=True,exist_ok=True);release.chmod(0o755)
     for src in (REPO/'deployment').iterdir():
         if src.suffix in ['.yaml','.yml','.sh','.conf','.py','.service']:write(release/src.name,src.read_text().replace('/srv/phyxi',str(ROOT)))
     p=release/'compose.yaml';p.write_text(p.read_text().replace('__GPU_UUID_LIST__',json.dumps(c['gpu_uuids'])).replace('cpus: "32"','cpus: '+json.dumps(str(c['model_cpus']))).replace('mem_limit: 512g',f"mem_limit: {c['model_memory_gib']}g").replace('shm_size: 32g',f"shm_size: {c['shm_gib']}g"))
@@ -192,22 +240,31 @@ def render(c, destination=None):
     write(release/'.env',''.join(f'{k}={v}\n' for k,v in env.items()),0o600)
     if destination:return release
     current=ROOT/'current'
-    assert not current.exists() or current.resolve()==release.resolve(),'A different release is active; use the documented maintenance procedure'
-    if not current.exists():current.symlink_to(release,target_is_directory=True)
+    if current.is_symlink() and current.resolve()!=release.resolve():
+        save(ROOT/'artifacts/previous-release.json',{'path':str(current.resolve())})
+        next_link=ROOT/'current.next'
+        assert not next_link.exists() and not next_link.is_symlink(),'Unexpected current.next; inspect before activation'
+        next_link.symlink_to(release,target_is_directory=True);next_link.replace(current)
+    elif not current.exists():current.symlink_to(release,target_is_directory=True)
     for d,uid in [('cache',10001),('prometheus',65534)]:os.chown(ROOT/d,uid,uid)
     run(['python3',release/'generate-secrets.py'])
+    save(release/'deployment-config.json',c)
+    save(release/'images.json',refs);save(release/'model.json',modelinfo)
     save(ROOT/'artifacts/deployment-config.json',c)
     run(['bash',current/'dc.sh','config','--quiet'])
 
 def tls_csr(c):
+    prepared(c);ensure_stopped()
     key=ROOT/'secrets/server.key';csr=ROOT/'artifacts/server.csr'
     if not key.exists():
-        run(['openssl','req','-new','-newkey','rsa:3072','-nodes','-keyout',key,'-out',csr,'-subj','/CN='+c['domain'],'-addext','subjectAltName=DNS:'+c['domain']])
+        run(['openssl','genpkey','-algorithm','RSA','-pkeyopt','rsa_keygen_bits:3072','-out',key])
+    run(['openssl','req','-new','-key',key,'-out',csr,'-subj','/CN='+c['domain'],'-addext','subjectAltName=DNS:'+c['domain']])
     os.chown(key,101,101);key.chmod(0o400)
     assert csr.exists(),'Private key already exists but CSR missing; inspect existing certificate material'
     print('Submit CSR to your CA:',csr)
 
 def tls_install(c):
+    prepared(c);ensure_stopped()
     key=ROOT/'secrets/server.key';cert=ROOT/'secrets/server-chain.pem';ca=ROOT/'secrets/company-ca.pem'
     if c['tls_mode']=='self-signed':
         run(['openssl','req','-x509','-new','-key',key,'-out',cert,'-days','30','-subj','/CN='+c['domain'],'-addext','subjectAltName=DNS:'+c['domain']])
@@ -224,13 +281,15 @@ def tls_install(c):
 
 def dc(*args):return run(['bash',ROOT/'current/dc.sh',*args])
 def start(c):
+    prepared(c)
     idle(c);assert (ROOT/'secrets/server-chain.pem').exists()
     assert c['intranet_ip'] in {x[4][0] for x in socket.getaddrinfo(c['domain'],443)},'Server DNS does not resolve to configured IP'
     # CUDA version/device check before loading weights; all eight devices are intentional.
     dc('run','--rm','--no-deps','--entrypoint','python3','model','-c','import torch; assert torch.cuda.device_count()==8; print([(torch.cuda.get_device_name(i),torch.cuda.get_device_capability(i)) for i in range(8)]); [torch.empty(1,device=f"cuda:{i}") for i in range(8)]')
     dc('run','--rm','--no-deps','--entrypoint','nginx','gateway','-t')
     shutil.copy2(ROOT/'current/phyxi-model.service','/etc/systemd/system/phyxi-model.service')
-    run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','phyxi-model.service']);dc('ps')
+    save(ROOT/'current/started.json',{'attempted_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())})
+    run(['systemctl','daemon-reload']);run(['systemctl','enable','phyxi-model.service']);run(['systemctl','restart','phyxi-model.service']);dc('ps')
 
 def verify(c):
     run(['python3',REPO/'scripts/verify-api.py','--base-url','https://'+c['domain']+'/v1','--ca',ROOT/'secrets/company-ca.pem','--token-file',ROOT/'secrets/cad-ws-01.token','--model','glm-5.3-flash','--max-tokens',str(c['verify_max_tokens']),'--reasoning-effort',c['reasoning_effort'],'--output',ROOT/'evidence/api-validation.json'])

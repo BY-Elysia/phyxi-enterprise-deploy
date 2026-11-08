@@ -1,10 +1,10 @@
 """Download exact official FP8 revision, verify declared shards, archive hashes."""
 import argparse,json,hashlib,os
 from pathlib import Path
-from huggingface_hub import snapshot_download
 p=argparse.ArgumentParser();p.add_argument('--root',required=True);p.add_argument('--lock',required=True);a=p.parse_args()
 root=Path(a.root);lock=json.loads(Path(a.lock).read_text());rev=lock['model_revision'];dest=root/'models/glm53-flash'/rev
 os.environ['HF_HOME']=str(root/'download-cache/huggingface')
+from huggingface_hub import snapshot_download
 snapshot_download(repo_id=lock['model_repo'],revision=rev,local_dir=dest,max_workers=4)
 c=json.loads((dest/'config.json').read_text());assert 'Glm5NextForConditionalGeneration' in c['architectures']
 assert c.get('quantization_config',{}).get('quant_method')=='fp8','Expected native FP8 checkpoint'

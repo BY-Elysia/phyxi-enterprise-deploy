@@ -31,11 +31,19 @@ Prometheus 15 秒抓取内部 /metrics，保留 15 天或最多 10 GB；本机 9
 
 ## 发布与回滚
 
-每个发布目录都包含完整 Compose、脚本、.env，模型和镜像按固定版本保留。Notebook 的初始部署不会自动切换到另一发布目录。升级时在新的目录准备并验收配置，然后在维护窗口执行：
+每个发布目录都包含完整 Compose、脚本、.env 和部署参数快照，模型和镜像按固定版本保留。升级统一在 Notebook 中执行：
+
+1. 执行第 19 节停止服务。
+2. 在第 1 节填写新的 `release` 和变更参数，执行配置单元。
+3. 按变更项重新运行软件、镜像或模型准备步骤。
+4. 执行第 10 节生成配置，保存 `previous-release.json` 并切换 `current`；已尝试启动的发布目录不可用变更参数覆盖。
+5. 域名或证书变化时执行第 11、12 节，然后执行第 13—15 节检查、启动和验收。
+
+回滚时，在维护窗口执行（将路径替换为 `previous-release.json` 中记录的旧发布目录）：
 
 ```bash
 systemctl stop phyxi-model.service
-ln -s /srv/phyxi/releases/新版本 /srv/phyxi/current.next
+ln -s /srv/phyxi/releases/旧版本 /srv/phyxi/current.next
 mv -Tf /srv/phyxi/current.next /srv/phyxi/current
 systemctl start phyxi-model.service
 ```
