@@ -1,0 +1,6 @@
+{
+  "upstream_repo": "qlsupersky/PhyXiCATIAagent",
+  "commit": "020ae85544dd55ebbc82166dbb7d3573aa7baee2",
+  "base_sha256": "12e3a9457b1cc39587ddde1eb5833b5bc17159ee5f4b1fe05bf11638b32e8f79",
+  "adapted_sha256": "eaac919fcbe2a551cc2ddf039096ec3b0e6106a9a9c31c32acf51c421b86d566"
+}

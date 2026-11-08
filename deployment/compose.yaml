@@ -1,0 +1,118 @@
+name: phyxi-enterprise
+services:
+  model:
+    image: ${VLLM_IMAGE:?set pinned image digest}
+    platform: linux/amd64
+    user: "10001:10001"
+    entrypoint: [/bin/bash, /start-model.sh]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: "32"
+    mem_limit: 512g
+    shm_size: 32g
+    pids_limit: 2048
+    stop_grace_period: 120s
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      VLLM_NO_USAGE_STATS: "1"
+      HOME: /cache
+      HF_HOME: /cache/huggingface
+      VLLM_CACHE_ROOT: /cache/vllm
+      TORCHINDUCTOR_CACHE_DIR: /cache/inductor
+      TRITON_CACHE_DIR: /cache/triton
+      XDG_CACHE_HOME: /cache
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      OMP_NUM_THREADS: "1"
+      VLLM_USE_FLASHINFER_SAMPLER: "0"
+      VLLM_USE_RUST_FRONTEND: "0"
+      VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+      TP_SIZE: "8"
+      MAX_MODEL_LEN: "${MAX_MODEL_LEN}"
+      MAX_NUM_SEQS: "${MAX_NUM_SEQS}"
+      GPU_MEMORY_UTILIZATION: "${GPU_MEMORY_UTILIZATION}"
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: __GPU_UUID_LIST__
+              capabilities: [gpu]
+    tmpfs: ["/tmp:size=8g,mode=1777"]
+    volumes:
+      - ${MODEL_DIR:?set model directory}:/model:ro
+      - /srv/phyxi/cache:/cache
+      - ./start-model.sh:/start-model.sh:ro
+      - /srv/phyxi/secrets/backend-key:/backend-key:ro
+      - ./check-image.py:/check-image.py:ro
+    networks: [inference]
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 3600s
+    logging:
+      driver: json-file
+      options: {max-size: 20m, max-file: "5"}
+  gateway:
+    image: ${NGINX_IMAGE:?set pinned image digest}
+    platform: linux/amd64
+    user: "101:101"
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: "1"
+    mem_limit: 256m
+    pids_limit: 128
+    ports: ["${INTRANET_IP:?set private interface}:443:8443"]
+    depends_on:
+      model: {condition: service_healthy}
+    tmpfs: ["/tmp:size=256m,mode=1777"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /srv/phyxi/secrets:/etc/phyxi-secrets:ro
+    networks: [inference]
+    healthcheck:
+      test: [CMD-SHELL, "kill -0 $$(cat /tmp/nginx.pid) && nginx -t -q"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options: {max-size: 20m, max-file: "5"}
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:?set pinned image digest}
+    user: "65534:65534"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: "1"
+    mem_limit: 1g
+    ports: ["127.0.0.1:9090:9090"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=10GB
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+      - /srv/phyxi/prometheus:/prometheus
+    networks: [inference]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+networks:
+  inference:
+    driver: bridge

@@ -1,0 +1,28 @@
+# 参数与资源预算
+
+| 项目 | 默认配置 | 含义与调整方式 |
+|---|---|---|
+| checkpoint | zai-org/GLM-5.3-Flash | 原生 FP8，下载 commit 在 versions.json 锁定 |
+| 对外模型名 | glm-5.3-flash | 网关、验收与 OpenCode 必须相同 |
+| TP | 8 | 一份模型分布到八张 H20；不是八个独立副本 |
+| dtype / KV | bfloat16 / auto | checkpoint 中量化权重保留 FP8；未量化层与默认 KV 使用 BF16 |
+| Python 前端 | VLLM_USE_RUST_FRONTEND=0 | 本项目需要图片输入 |
+| tokenizer-mode | auto | Hugging Face 模板与处理器路径 |
+| 工具 / 思考解析器 | glm47 / glm47 | 不是 Qwen 的解析器 |
+| 思考参数 | reasoning_effort=low | GLM 模板仍生成思考，不能当成不思考模式 |
+| 上下文 | 65536 | 输入和输出总预算；远小于模型标称极限，便于先验收 |
+| 调度上限 | 16 | 同时调度序列数，非可承载企业用户数 |
+| 批 token 预算 | 4096 | 每次调度的输入/生成 token 预算 |
+| 显存利用率 | 0.85 | 每卡进程目标预算；启动日志给出实际权重、激活与缓存 |
+| FlashInfer autotune | disabled | Hopper 官方 recipe 对应选项 |
+| 图片 / 视频 | 4 / 0 | 每请求图片最多四张，当前不接收视频 |
+| 前缀缓存 / 分块预填充 | 开启 | 复用已有前缀、分批处理长输入 |
+| MTP / PD 分离 | 未开启 | 先验收基本链路，再独立比较优化效果 |
+| CPU / 内存 / shm | 32 CPU / 512 GiB / 32 GiB | 容器限制，主机另留系统余量 |
+| 网关在途限制 | 每 Token 4 / 全局 16 | 防止单调用方挤占；超过返回 429 |
+
+官方 recipe 给出的 FP8 权重约 306 GiB；在 TP8 下粗略均摊约 38.3 GiB/卡，仅用于权重预算。各层切分、未量化模块、通信缓冲、激活和混合注意力状态使实际占用不同。缓存分配按实际启动结果确定，不能把剩余显存直接除以固定 KV/token 来推断本模型用户数。
+
+Notebook `max_model_len`、`max_num_seqs`、`gpu_memory_utilization` 可配置；其他基线变更需修改模板并重新验收。八张 GPU UUID 必须明确填写，程序不自动选卡。每次调参使用新的发布目录，保存对应镜像与模型版本。
+
+压测输出 TPS = 本轮成功请求的实际 `completion_tokens` 合计 / 总耗时，含思考、网络、预填充和排队。结果同时记录截断数及是否存在可见回答，避免将只有思考且被截断的响应当成完整业务任务。

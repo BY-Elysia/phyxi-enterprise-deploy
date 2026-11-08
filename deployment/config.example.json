@@ -1,0 +1,17 @@
+{
+  "dedicated_server": true,
+  "domain": "llm.corp.example",
+  "intranet_ip": "10.20.0.10",
+  "allowed_cidrs": ["10.20.0.0/16"],
+  "gpu_uuids": [],
+  "max_model_len": 65536,
+  "max_num_seqs": 16,
+  "gpu_memory_utilization": 0.85,
+  "release": "20261108-01",
+  "tls_mode": "enterprise",
+  "tls_chain_source": "/secure-transfer/server-chain.pem",
+  "tls_ca_source": "/secure-transfer/company-ca.pem",
+  "alertmanager": "",
+  "docker_version": "",
+  "toolkit_version": "1.20.1-1"
+}

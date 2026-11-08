@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+config.local.json
+*.pem
+*.key
+*.token
+.env
+secrets/
+artifacts/
+evidence/
+client-export/

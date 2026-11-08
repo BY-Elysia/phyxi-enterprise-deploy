@@ -1,0 +1,8 @@
+{
+  "model_repo": "zai-org/GLM-5.3-Flash",
+  "model_revision": "46a050bec13002ad29ee795c16e61cf4fa3c4a9c",
+  "vllm_image": "vllm/vllm-openai@sha256:9db5b819a319fb99998c1fc262d06643208e03c6903a7e2aaa5de7ea832d6d9f",
+  "resolved_at": "2026-11-08",
+  "source_tag": "nightly",
+  "hardware_validation": "target-server acceptance required"
+}

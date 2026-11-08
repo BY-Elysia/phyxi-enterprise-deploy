@@ -1,0 +1,79 @@
+diff --git a/opencode_link.py b/opencode_link.py
+index c180bc6..72acfd0 100644
+--- a/opencode_link.py
++++ b/opencode_link.py
+@@ -68,7 +68,7 @@ def render_messages(rows):
+ 
+ 
+ class OpenCodeLink:
+-    def __init__(self, workspace, project=None):
++    def __init__(self, workspace, project=None, connection_file=None):
+         self.workspace = Path(workspace).resolve()
+         self.project = Path(project or Path.home() / 'Documents' / '默认项目').resolve()
+         self.project.mkdir(parents=True, exist_ok=True)
+@@ -79,23 +79,38 @@ class OpenCodeLink:
+         self.lock = threading.Lock()
+         self.state_file = self.history / 'current-session.json'
+         self.session = None
++        self.connection_file = connection_file or os.environ.get('PHYXI_OPENCODE_CONNECTION')
+         if self.state_file.exists():
+             state = json.loads(self.state_file.read_text(encoding='utf-8'))
+             if state.get('project') == str(self.project):
+                 self.session = state.get('session')
+ 
+     def connect(self):
+-        completed = subprocess.run([str(cli_path()), 'service', 'start'], capture_output=True, timeout=40,
+-                                   creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+-        found = re.findall(r'http://127\.0\.0\.1:\d+', (completed.stdout + completed.stderr).decode('utf-8', errors='replace'))
+-        if completed.returncode or not found:
+-            raise RuntimeError('OpenCode默认服务未就绪；请检查OpenCode服务状态')
+-        self.url = found[-1]
+-        protected = Path.home() / '.config' / 'opencode' / 'service.json'
+-        password = json.loads(protected.read_text(encoding='utf-8-sig'))['password']
++        if self.connection_file:
++            connection = json.loads(Path(self.connection_file).read_text(encoding='utf-8-sig'))
++            url = connection.get('url', '')
++            if not re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}', url):
++                raise ValueError('独立 OpenCode 服务必须使用本机 127.0.0.1 地址')
++            if not 1 <= urllib.parse.urlsplit(url).port <= 65535:
++                raise ValueError('独立 OpenCode 服务端口无效')
++            password = connection.get('password')
++            if not isinstance(password, str) or not password:
++                raise ValueError('独立 OpenCode 服务缺少认证信息')
++            self.url = url
++            config_path = Path(connection['config_path'])
++        else:
++            completed = subprocess.run([str(cli_path()), 'service', 'start'], capture_output=True, timeout=40,
++                                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
++            found = re.findall(r'http://127\.0\.0\.1:\d+', (completed.stdout + completed.stderr).decode('utf-8', errors='replace'))
++            if completed.returncode or not found:
++                raise RuntimeError('OpenCode默认服务未就绪；请检查OpenCode服务状态')
++            self.url = found[-1]
++            protected = Path.home() / '.config' / 'opencode' / 'service.json'
++            password = json.loads(protected.read_text(encoding='utf-8-sig'))['password']
++            config_path = protected.parent / 'opencode.json'
+         self.authorization = 'Basic ' + base64.b64encode(('opencode:' + password).encode()).decode()
+         # Runtime registration is needed per project context, without changing providers.
+-        global_config = json.loads((protected.parent / 'opencode.json').read_text(encoding='utf-8-sig'))
++        global_config = json.loads(config_path.read_text(encoding='utf-8-sig'))
+         definitions = global_config.get('mcp', {})
+         definitions = {**definitions.get('servers', {}), **{k:v for k,v in definitions.items() if k != 'servers'}}
+         statuses = {x['name']: x['status'].get('status') for x in self.api('GET', '/api/mcp')['data']}
+@@ -103,7 +118,7 @@ class OpenCodeLink:
+             if name in definitions and statuses.get(name) != 'connected':
+                 self.api('PUT', '/api/experimental/mcp/' + name, {'config': definitions[name]}, timeout=45)
+         return {'base_url': self.url, 'project': str(self.project), 'mcp': self.api('GET', '/api/mcp'),
+-                'session': self.session, 'shared_default_service': True}
++                'session': self.session, 'shared_default_service': not bool(self.connection_file)}
+ 
+     def api(self, method, path, body=None, timeout=20, *, context=True):
+         if self.url is None:
+@@ -298,6 +313,8 @@ class OpenCodeLink:
+             self.api('POST', '/api/session/' + self.session + '/interrupt?resume=false', {})
+ 
+     def open_full_interface(self):
++        if self.connection_file:
++            raise RuntimeError('当前连接独立测试服务，请使用本项目 WebUI；不会打开默认 OpenCode 服务')
+         # Exact same default service/project/session. No credentials in arguments.
+         args = [str(cli_path()), str(self.project), '--auto']
+         if self.session: args += ['--session', self.session]
