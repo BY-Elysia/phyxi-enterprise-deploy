@@ -26,7 +26,7 @@ bash scripts/bootstrap-notebook.sh
 ssh -N -L 8888:127.0.0.1:8888 管理用户@企业服务器
 ```
 
-使用服务器终端输出的 Jupyter token，在浏览器访问 `http://127.0.0.1:8888`，打开 `notebooks/01-deploy-glm53-flash.ipynb`。按单元顺序执行，先填写域名、IP、网段、GPU UUID。管理员 Notebook 只监听回环，不开放公网；交付后关闭 Jupyter，模型由 systemd 独立运行。
+使用服务器终端输出的 Jupyter token，在浏览器访问 `http://127.0.0.1:8888`，打开 `notebooks/01-deploy-glm53-flash.ipynb`。按单元顺序执行。第 1 节列出所有需要填写或确认的参数，在 `OVERRIDES` 字典中把对应 `None` 替换成实际值即可；无需修改脚本、JSON 或 YAML。`None` 保留已保存值，首次采用默认值。每个步骤前说明相关字段和生效条件。管理员 Notebook 只监听回环，不开放公网；交付后关闭 Jupyter，模型由 systemd 独立运行。
 
 驱动安装后的重启、企业 CA 签发是两个明确停点。重启后再次运行 bootstrap，重跑 Notebook 的环境定位/配置读取单元，再从提示的步骤继续。
 
@@ -56,7 +56,7 @@ tests/                              本地静态和隔离测试；不调用 GPU
 - **多模态**：Python 前端、`tokenizer-mode=auto`；H20 上采用 BF16 KV。
 - **资源**：TP=8，初始上下文 65,536 token，`max-num-seqs=16`，每卡显存预算 0.85。这些是配置初值，不是容量保证。
 - **服务**：仅 Nginx 在企业内网 IP:443 发布；模型 8000 不映射宿主机；Prometheus 9090 只监听服务器回环。
-- **存储**：固定根目录 `/srv/phyxi`。根目录不是一个可随意修改的单参数，所有模板共同依赖该布局。
+- **存储**：默认 `/srv/phyxi`，首次部署可在 Notebook 的 `data_root` 修改为已挂载的专用数据卷；生成的配置路径同步替换。已部署的 Docker 数据目录不能当作普通参数直接迁移。
 - **思考**：使用 GLM 支持的 `reasoning_effort=low`；仍可能生成思考 token。TPS 按 API 实际 completion_tokens 统计，包含思考。
 
 [参数说明](docs/parameters.md) · [架构流程](docs/architecture.md) · [Windows 接入](docs/workstation.md) · [运维与回滚](docs/operations.md) · [官方依据](docs/sources.md)

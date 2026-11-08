@@ -24,6 +24,15 @@ def sha(p):
     return h.hexdigest()
 
 def validate(c, require_gpus=False):
+    root=Path(c['data_root']);assert root.is_absolute() and len(root.parts)>=3 and '..' not in root.parts and re.fullmatch(r'/[A-Za-z0-9_/-]+',str(root)), 'Use an absolute dedicated data mount, e.g. /srv/phyxi'
+    assert c['driver_branch']>=580 and isinstance(c['driver_branch'],int)
+    assert re.fullmatch(r'[a-f0-9]{40}',c['model_revision'])
+    assert re.fullmatch(r'[A-Za-z0-9./:_-]+@sha256:[a-f0-9]{64}',c['vllm_image']), 'vLLM must be pinned by digest'
+    for image in [c['nginx_image'],c['prometheus_image']]:assert re.fullmatch(r'[A-Za-z0-9./:@_-]+',image)
+    for key in ['model_cpus','model_memory_gib','shm_gib','max_num_batched_tokens','max_images','per_client_connections','total_connections','benchmark_requests','benchmark_max_tokens','verify_max_tokens']:assert isinstance(c[key],int) and c[key]>0,key
+    assert c['per_client_connections']<=c['total_connections']
+    assert c['benchmark_concurrency'] and all(isinstance(n,int) and n>0 for n in c['benchmark_concurrency'])
+    assert c['reasoning_effort'] in ['low','high','max']
     assert c['dedicated_server'] is True,'Only dedicated servers are supported'
     assert re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.-]+',c['domain']) and '.' in c['domain']
     ip=ipaddress.ip_address(c['intranet_ip']);assert ip.version==4 and not ip.is_loopback
@@ -71,7 +80,7 @@ def preflight(c):
     host();mounted();no_foreign_docker()
     assert not c['domain'].endswith('.example'),'Replace the example domain in notebook cell 1'
     mem=int(next(x.split()[1] for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemTotal:')))/1024**2
-    assert mem>=600,'At least 600 GiB host RAM required for this baseline (recommend >=768 GiB)'
+    assert mem>=max(600,c['model_memory_gib']+64),'At least 600 GiB host RAM required for this baseline (recommend >=768 GiB)'
     assert shutil.disk_usage(ROOT).free>=600*1024**3,'At least 600 GiB free data space required for initial preparation'
     run(['df','-h',ROOT]);run(['lscpu'])
     if shutil.which('nvidia-smi'):
@@ -90,11 +99,11 @@ def driver(c):
         assert load(marker)['boot_id']!=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),'Driver installation requires reboot; resume this cell after reboot'
     if shutil.which('nvidia-smi') and subprocess.run(['nvidia-smi'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
         v=run(['nvidia-smi','--query-gpu=driver_version','--format=csv,noheader'],capture=True)
-        assert all(int(x.split('.')[0])>=580 for x in v.splitlines()),'Existing driver below 580; upgrade during a maintenance window'
+        assert all(int(x.split('.')[0])>=c['driver_branch'] for x in v.splitlines()),f"Existing driver below requested branch {c['driver_branch']}; upgrade during a maintenance window"
         write(ROOT/'artifacts/driver-version.txt',v);return
     deb=ROOT/'artifacts/cuda-keyring.deb'
     run(['curl','-fL','https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb','-o',deb])
-    run(['dpkg','-i',deb]);run(['apt-get','update']);run(['apt-get','install','-y','nvidia-driver-pinning-580','nvidia-open'])
+    run(['dpkg','-i',deb]);run(['apt-get','update']);run(['apt-get','install','-y','nvidia-driver-pinning-'+str(c['driver_branch']),'nvidia-open'])
     save(marker,{'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()})
     raise RuntimeError('Driver installed. Reboot manually, reopen notebook and rerun this cell. Secure Boot may require MOK enrollment.')
 
@@ -122,9 +131,9 @@ def docker(c):
     run(['systemctl','stop','docker.service','docker.socket','containerd.service'])
     save(daemon,{'data-root':str(ROOT/'docker'),'storage-driver':'overlay2','features':{'containerd-snapshotter':False},'log-driver':'json-file','log-opts':{'max-size':'20m','max-file':'5'},'live-restore':True,'max-concurrent-downloads':2})
     conf=run(['containerd','config','default'],capture=True)
-    conf,n=re.subn(r'^root\s*=.*$', 'root = "/srv/phyxi/containerd"',conf,count=1,flags=re.M);assert n==1
+    conf,n=re.subn(r'^root\s*=.*$', 'root = '+json.dumps(str(ROOT/'containerd')),conf,count=1,flags=re.M);assert n==1
     write('/etc/containerd/config.toml',conf)
-    for unit in ['docker','containerd']:write('/etc/systemd/system/'+unit+'.service.d/storage.conf','[Unit]\nRequiresMountsFor=/srv/phyxi\n')
+    for unit in ['docker','containerd']:write('/etc/systemd/system/'+unit+'.service.d/storage.conf','[Unit]\nRequiresMountsFor='+str(ROOT)+'\n')
     run(['dockerd','--validate','--config-file=/etc/docker/daemon.json']);run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','containerd','docker'])
     actual=run(DOCKER+['info','--format','{{.DockerRootDir}}'],capture=True).strip();assert actual==str(ROOT/'docker')
     save(ROOT/'artifacts/docker-managed.json',{'version':version,'data_root':actual})
@@ -144,10 +153,10 @@ def toolkit(c):
     save(marker,{'version':v})
 
 def images(c):
-    lock=load(REPO/'deployment/versions.json');p=ROOT/'artifacts/images.json'
+    lock=load(REPO/'deployment/versions.json');lock['vllm_image']=c['vllm_image'];p=ROOT/'artifacts/images.json'
     if p.exists():
         assert load(p)['vllm']==lock['vllm_image'],'Version lock changed; use a new validated release';refs=load(p)
-    else:refs={'vllm':lock['vllm_image'],'nginx':'nginx:stable-alpine','prometheus':'prom/prometheus:v3.5.0'}
+    else:refs={'vllm':lock['vllm_image'],'nginx':c['nginx_image'],'prometheus':c['prometheus_image']}
     for k,v in refs.items():
         run(DOCKER+['pull','--platform','linux/amd64',v])
         if '@sha256:' not in v:refs[k]=json.loads(run(DOCKER+['image','inspect',v],capture=True))[0]['RepoDigests'][0]
@@ -161,10 +170,12 @@ def images(c):
 
 def model(c):
     lock=load(REPO/'deployment/versions.json')
+    lock['model_revision']=c['model_revision']
+    save(ROOT/'artifacts/model-download-lock.json',lock)
     run(['python3','-m','venv',ROOT/'tools-hf']);pip=ROOT/'tools-hf/bin/pip'
     run([pip,'install','--cache-dir',ROOT/'download-cache/pip','huggingface_hub'])
     write(ROOT/'artifacts/download-packages.txt',run([pip,'freeze'],capture=True))
-    run([ROOT/'tools-hf/bin/python',REPO/'scripts/download-model.py','--root',ROOT,'--lock',REPO/'deployment/versions.json'])
+    run([ROOT/'tools-hf/bin/python',REPO/'scripts/download-model.py','--root',ROOT,'--lock',ROOT/'artifacts/model-download-lock.json'])
 
 def render(c, destination=None):
     validate(c,True);release=Path(destination) if destination else ROOT/'releases'/c['release'];release.mkdir(parents=True,exist_ok=True);release.chmod(0o755)
@@ -172,12 +183,12 @@ def render(c, destination=None):
     if not destination and (ROOT/'artifacts/deployment-config.json').exists():
         assert load(ROOT/'artifacts/deployment-config.json')==c,'Configuration changed: prepare a new release using docs/operations.md, do not overwrite the active release'
     for src in (REPO/'deployment').iterdir():
-        if src.suffix in ['.yaml','.yml','.sh','.conf','.py','.service']:shutil.copy2(src,release/src.name)
-    p=release/'compose.yaml';p.write_text(p.read_text().replace('__GPU_UUID_LIST__',json.dumps(c['gpu_uuids'])))
-    p=release/'nginx.conf';p.write_text(p.read_text().replace('llm.corp.example',c['domain']).replace('    allow 10.20.0.0/16;', '\n'.join('    allow '+x+';' for x in c['allowed_cidrs'])+'\n    allow '+c['intranet_ip']+'/32;'))
+        if src.suffix in ['.yaml','.yml','.sh','.conf','.py','.service']:write(release/src.name,src.read_text().replace('/srv/phyxi',str(ROOT)))
+    p=release/'compose.yaml';p.write_text(p.read_text().replace('__GPU_UUID_LIST__',json.dumps(c['gpu_uuids'])).replace('cpus: "32"','cpus: '+json.dumps(str(c['model_cpus']))).replace('mem_limit: 512g',f"mem_limit: {c['model_memory_gib']}g").replace('shm_size: 32g',f"shm_size: {c['shm_gib']}g"))
+    p=release/'nginx.conf';p.write_text(p.read_text().replace('llm.corp.example',c['domain']).replace('limit_conn per_client 4;',f"limit_conn per_client {c['per_client_connections']};").replace('limit_conn global 16;',f"limit_conn global {c['total_connections']};").replace('    allow 10.20.0.0/16;', '\n'.join('    allow '+x+';' for x in c['allowed_cidrs'])+'\n    allow '+c['intranet_ip']+'/32;'))
     p=release/'prometheus.yml'
     if c['alertmanager']:p.write_text(p.read_text()+'\nalerting:\n  alertmanagers:\n    - static_configs:\n        - targets: '+json.dumps([c['alertmanager']])+'\n')
-    env={'VLLM_IMAGE':refs['vllm'],'NGINX_IMAGE':refs['nginx'],'PROMETHEUS_IMAGE':refs['prometheus'],'MODEL_DIR':modelinfo['directory'],'INTRANET_IP':c['intranet_ip'],'SERVED_MODEL_NAME':'glm-5.3-flash','MAX_MODEL_LEN':c['max_model_len'],'MAX_NUM_SEQS':c['max_num_seqs'],'GPU_MEMORY_UTILIZATION':c['gpu_memory_utilization']}
+    env={'VLLM_IMAGE':refs['vllm'],'NGINX_IMAGE':refs['nginx'],'PROMETHEUS_IMAGE':refs['prometheus'],'MODEL_DIR':modelinfo['directory'],'INTRANET_IP':c['intranet_ip'],'SERVED_MODEL_NAME':'glm-5.3-flash','MAX_NUM_BATCHED_TOKENS':c['max_num_batched_tokens'],'MAX_IMAGES':c['max_images'],'REASONING_EFFORT':c['reasoning_effort'],'MAX_MODEL_LEN':c['max_model_len'],'MAX_NUM_SEQS':c['max_num_seqs'],'GPU_MEMORY_UTILIZATION':c['gpu_memory_utilization']}
     write(release/'.env',''.join(f'{k}={v}\n' for k,v in env.items()),0o600)
     if destination:return release
     current=ROOT/'current'
@@ -222,12 +233,12 @@ def start(c):
     run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','phyxi-model.service']);dc('ps')
 
 def verify(c):
-    run(['python3',REPO/'scripts/verify-api.py','--base-url','https://'+c['domain']+'/v1','--ca',ROOT/'secrets/company-ca.pem','--token-file',ROOT/'secrets/cad-ws-01.token','--model','glm-5.3-flash','--output',ROOT/'evidence/api-validation.json'])
+    run(['python3',REPO/'scripts/verify-api.py','--base-url','https://'+c['domain']+'/v1','--ca',ROOT/'secrets/company-ca.pem','--token-file',ROOT/'secrets/cad-ws-01.token','--model','glm-5.3-flash','--max-tokens',str(c['verify_max_tokens']),'--reasoning-effort',c['reasoning_effort'],'--output',ROOT/'evidence/api-validation.json'])
     run(['curl','-fsS','http://127.0.0.1:9090/-/ready'])
 
 def benchmark(c):
-    for n in [1,2,4]:
-        run(['python3',REPO/'scripts/load-test.py','--base-url','https://'+c['domain']+'/v1','--ca',ROOT/'secrets/company-ca.pem','--token-file',ROOT/'secrets/cad-ws-01.token','--model','glm-5.3-flash','--concurrency',str(n),'--requests','16','--max-tokens','1024','--output',ROOT/f'evidence/load-c{n}.json'])
+    for n in c['benchmark_concurrency']:
+        run(['python3',REPO/'scripts/load-test.py','--base-url','https://'+c['domain']+'/v1','--ca',ROOT/'secrets/company-ca.pem','--token-file',ROOT/'secrets/cad-ws-01.token','--model','glm-5.3-flash','--concurrency',str(n),'--requests',str(c['benchmark_requests']),'--max-tokens',str(c['benchmark_max_tokens']),'--reasoning-effort',c['reasoning_effort'],'--output',ROOT/f'evidence/load-c{n}.json'])
 
 def export(c):
     folder=ROOT/'client-export';folder.mkdir(mode=0o700,exist_ok=True)
@@ -245,6 +256,6 @@ def stop(c):
 STAGES={k:v for k,v in globals().copy().items() if k in ['preflight','base','driver','docker','toolkit','images','model','render','tls_csr','tls_install','start','verify','benchmark','export','status','stop']}
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('stage',choices=STAGES);p.add_argument('--config',required=True);a=p.parse_args()
-    c=load(a.config);validate(c);host();os.umask(0o077)
+    c=load(a.config);validate(c);ROOT=Path(c['data_root']);host();os.umask(0o077)
     try:STAGES[a.stage](c)
     except (AssertionError,RuntimeError) as e:raise SystemExit(str(e))

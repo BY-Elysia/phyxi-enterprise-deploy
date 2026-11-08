@@ -32,7 +32,7 @@ flowchart LR
  P[Prometheus] -->|内部 metrics| V
 ```
 
-服务器目录：
+服务器目录（默认根目录；首次可在 Notebook 中设置 `data_root`）：
 
 ```text
 /srv/phyxi/

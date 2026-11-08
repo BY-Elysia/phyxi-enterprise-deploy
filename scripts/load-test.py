@@ -5,12 +5,13 @@ p=argparse.ArgumentParser()
 p.add_argument('--base-url',required=True);p.add_argument('--ca',required=True);p.add_argument('--token-file',required=True)
 p.add_argument('--model',default='glm-5.3-flash');p.add_argument('--concurrency',type=int,required=True)
 p.add_argument('--requests',type=int,default=32);p.add_argument('--max-tokens',type=int,default=256)
-p.add_argument('--output',required=True);a=p.parse_args()
+p.add_argument('--output',required=True)
+p.add_argument('--reasoning-effort',choices=['low','high','max'],default='low');a=p.parse_args()
 assert a.concurrency>0 and a.requests>0
 ctx=ssl.create_default_context(cafile=a.ca);key=Path(a.token_file).read_text(encoding='utf-8').strip()
 def request(i):
  body={'model':a.model,'messages':[{'role':'user','content':f'编号{i}。用中文详细描述参数化零件建模的一般步骤，不调用工具。'}],
-       'max_tokens':a.max_tokens,'temperature':0,'chat_template_kwargs':{'reasoning_effort':'low'}}
+       'max_tokens':a.max_tokens,'temperature':0,'chat_template_kwargs':{'reasoning_effort':a.reasoning_effort}}
  req=urllib.request.Request(a.base_url.rstrip('/')+'/chat/completions',data=json.dumps(body).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
  op=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPSHandler(context=ctx));start=time.perf_counter()
  try:

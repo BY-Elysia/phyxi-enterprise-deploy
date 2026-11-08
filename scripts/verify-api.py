@@ -6,7 +6,10 @@ parser.add_argument('--ca',required=True)
 parser.add_argument('--token-file',required=True)
 parser.add_argument('--model',default='glm-5.3-flash')
 parser.add_argument('--output',default='api-validation.json')
+parser.add_argument('--max-tokens',type=int,default=4096)
+parser.add_argument('--reasoning-effort',choices=['low','high','max'],default='low')
 args=parser.parse_args()
+assert args.max_tokens>0
 out=[];completed=False
 output=Path(args.output);output.parent.mkdir(parents=True,exist_ok=True)
 def save():
@@ -32,7 +35,7 @@ def call(path,body=None):
  return op.open(req,timeout=600)
 def chat(label,messages,**kwargs):
  start=time.monotonic()
- body={'model':model,'messages':messages,'max_tokens':4096,'temperature':0,'chat_template_kwargs':{'reasoning_effort':'low'},**kwargs}
+ body={'model':model,'messages':messages,'max_tokens':args.max_tokens,'temperature':0,'chat_template_kwargs':{'reasoning_effort':args.reasoning_effort},**kwargs}
  with call('/chat/completions',body) as r:data=json.load(r)
  out.append({'test':label,'http_status':200,'seconds':round(time.monotonic()-start,3),'usage':data.get('usage'),'message':data['choices'][0]['message'],'finish_reason':data['choices'][0]['finish_reason']})
  return data['choices'][0]['message']
@@ -40,7 +43,7 @@ with call('/models') as r:models=json.load(r)
 assert model in [x['id'] for x in models['data']]
 answer=chat('text',[{'role':'user','content':'只回复：连接成功'}]);assert '连接成功' in (answer.get('content') or '')
 start=time.monotonic();pieces=[];first=None;done=False
-with call('/chat/completions',{'model':model,'messages':[{'role':'user','content':'只回复 OK'}],'max_tokens':4096,'temperature':0,'stream':True,'chat_template_kwargs':{'reasoning_effort':'low'}}) as r:
+with call('/chat/completions',{'model':model,'messages':[{'role':'user','content':'只回复 OK'}],'max_tokens':args.max_tokens,'temperature':0,'stream':True,'chat_template_kwargs':{'reasoning_effort':args.reasoning_effort}}) as r:
  for line in r:
   text=line.decode().strip()
   if text=='data: [DONE]':done=True;break

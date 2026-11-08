@@ -41,6 +41,26 @@ class DeploymentTests(unittest.TestCase):
    self.assertEqual(model['environment']['VLLM_USE_RUST_FRONTEND'],'0')
    self.assertEqual(model['environment']['TP_SIZE'],'8')
    self.assertEqual(parsed['services']['gateway']['ports'][0]['host_ip'],c['intranet_ip'])
+ def test_notebook_controls_reach_rendered_files(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td)/'custom-data';(root/'artifacts').mkdir(parents=True)
+   (root/'artifacts/images.json').write_text(json.dumps({'vllm':'vllm/vllm-openai@sha256:'+'a'*64,'nginx':'nginx@sha256:'+'b'*64,'prometheus':'prom/prometheus@sha256:'+'c'*64}))
+   (root/'artifacts/model.json').write_text(json.dumps({'directory':str(root/'models/fixed')}))
+   c=configuration();c.update(data_root=str(root),model_cpus=24,model_memory_gib=480,shm_gib=24,max_num_batched_tokens=8192,max_images=2,reasoning_effort='high',per_client_connections=3,total_connections=12,max_model_len=32768,max_num_seqs=8,gpu_memory_utilization=.8)
+   with patch.object(deploy,'ROOT',root):release=deploy.render(c,root/'release')
+   compose=(release/'compose.yaml').read_text();self.assertIn('cpus: "24"',compose);self.assertIn('mem_limit: 480g',compose);self.assertIn('shm_size: 24g',compose)
+   nginx=(release/'nginx.conf').read_text();self.assertIn('limit_conn per_client 3;',nginx);self.assertIn('limit_conn global 12;',nginx)
+   env=(release/'.env').read_text()
+   for item in ['MAX_MODEL_LEN=32768','MAX_NUM_SEQS=8','MAX_NUM_BATCHED_TOKENS=8192','MAX_IMAGES=2','REASONING_EFFORT=high','GPU_MEMORY_UTILIZATION=0.8']:self.assertIn(item,env)
+   for name in ['compose.yaml','dc.sh','generate-secrets.py','phyxi-model.service']:
+    content=(release/name).read_text();self.assertNotIn('/srv/phyxi',content);self.assertIn(str(root),content)
+ def test_benchmark_config_is_forwarded(self):
+  c=configuration();c.update(benchmark_concurrency=[2],benchmark_requests=5,benchmark_max_tokens=777,reasoning_effort='high',verify_max_tokens=3000)
+  with patch.object(deploy,'run') as call:
+   deploy.benchmark(c);cmd=list(map(str,call.call_args.args[0]))
+   for flag,value in [('--requests','5'),('--max-tokens','777'),('--concurrency','2'),('--reasoning-effort','high')]:self.assertEqual(cmd[cmd.index(flag)+1],value)
+  with patch.object(deploy,'run') as call:
+   deploy.verify(c);cmd=list(map(str,call.call_args_list[0].args[0]));self.assertEqual(cmd[cmd.index('--max-tokens')+1],'3000')
  def test_notebook_stages_and_no_outputs(self):
   nb=json.loads((ROOT/'notebooks/01-deploy-glm53-flash.ipynb').read_text())
   self.assertEqual(nb['nbformat'],4)

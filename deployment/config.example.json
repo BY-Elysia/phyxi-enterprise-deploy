@@ -2,7 +2,9 @@
   "dedicated_server": true,
   "domain": "llm.corp.example",
   "intranet_ip": "10.20.0.10",
-  "allowed_cidrs": ["10.20.0.0/16"],
+  "allowed_cidrs": [
+    "10.20.0.0/16"
+  ],
   "gpu_uuids": [],
   "max_model_len": 65536,
   "max_num_seqs": 16,
@@ -13,5 +15,27 @@
   "tls_ca_source": "/secure-transfer/company-ca.pem",
   "alertmanager": "",
   "docker_version": "",
-  "toolkit_version": "1.20.1-1"
+  "toolkit_version": "1.20.1-1",
+  "data_root": "/srv/phyxi",
+  "driver_branch": 580,
+  "model_revision": "46a050bec13002ad29ee795c16e61cf4fa3c4a9c",
+  "vllm_image": "vllm/vllm-openai@sha256:9db5b819a319fb99998c1fc262d06643208e03c6903a7e2aaa5de7ea832d6d9f",
+  "nginx_image": "nginx:stable-alpine",
+  "prometheus_image": "prom/prometheus:v3.5.0",
+  "model_cpus": 32,
+  "model_memory_gib": 512,
+  "shm_gib": 32,
+  "max_num_batched_tokens": 4096,
+  "max_images": 4,
+  "reasoning_effort": "low",
+  "per_client_connections": 4,
+  "total_connections": 16,
+  "benchmark_concurrency": [
+    1,
+    2,
+    4
+  ],
+  "benchmark_requests": 16,
+  "benchmark_max_tokens": 1024,
+  "verify_max_tokens": 4096
 }
