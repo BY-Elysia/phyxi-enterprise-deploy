@@ -25,3 +25,5 @@
 项目包含两条运行路径：本仓库适配的是 WebUI / 独立 OpenCode 链路。原生建模引擎中固定 provider 的位置仍需作为单独项目改造验证，不将其视为已完成 GLM 接入。
 
 每个工作站需要独立 Token。新增 Token 的服务器操作见 operations.md，不能把同一凭据复制给所有人后用它估算多用户容量。
+
+安装默认使用清华 PyPI 和 npmmirror。Notebook 的下载配置可复制为工作站仓库根目录的 `downloads.local.json`，详见 [下载源说明](downloads.md)。

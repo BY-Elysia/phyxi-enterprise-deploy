@@ -2,6 +2,10 @@
 
 面向 **8×H20 专用服务器**的 vLLM + Nginx + Prometheus 部署与 OpenCode 接入。模型使用官方 `zai-org/GLM-5.3-Flash` 原生 FP8 checkpoint。主要入口为 [部署 Notebook](notebooks/01-deploy-glm53-flash.ipynb)。
 
+## 默认公共镜像下载
+
+默认使用清华 PyPI、Ubuntu、Docker CE，DaoCloud 容器加速、HF-Mirror 和 npmmirror。Notebook 第 1 节 `DOWNLOADS` 可直接修改。首次安装 Git 前的换源命令、官方源保留项与生效顺序见 [下载源说明](docs/downloads.md)。
+
 ## 从全新服务器开始
 
 准备 Ubuntu 24.04 x86_64、SSH 管理权限、已挂载到 `/srv/phyxi` 的数据卷。推荐 ≥768 GiB 主机内存、≥1.5 TB 数据卷；初次制备至少 600 GiB 空闲。磁盘分区和格式化由管理员完成，Notebook 不擦除磁盘。

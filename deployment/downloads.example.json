@@ -1,0 +1,12 @@
+{
+  "pip_index_url": "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple",
+  "ubuntu_mirror": "https://mirrors.tuna.tsinghua.edu.cn/ubuntu",
+  "docker_apt_mirror": "https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/ubuntu",
+  "docker_registry_mirrors": [
+    "https://docker.m.daocloud.io"
+  ],
+  "hf_endpoint": "https://hf-mirror.com",
+  "npm_registry": "https://registry.npmmirror.com",
+  "python_installer_url": "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe",
+  "project_archive_url": "https://github.com/qlsupersky/PhyXiCATIAagent/archive/020ae85544dd55ebbc82166dbb7d3573aa7baee2.zip"
+}

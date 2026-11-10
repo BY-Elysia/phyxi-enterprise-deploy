@@ -11,3 +11,5 @@ secrets/
 artifacts/
 evidence/
 client-export/
+
+downloads.local.json

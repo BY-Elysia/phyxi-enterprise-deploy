@@ -2,6 +2,8 @@
 """Explicit stages for a dedicated Ubuntu 24.04 host. Never run on a shared trainer."""
 import argparse,hashlib,ipaddress,json,os,platform,re,shutil,socket,subprocess,sys,time
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from download_sources import settings as download_settings
 ROOT=Path('/srv/phyxi')
 REPO=Path(__file__).resolve().parents[1]
 DOCKER=['/usr/bin/docker','--host','unix:///var/run/docker.sock']
@@ -112,7 +114,7 @@ def preflight(c):
         assert not run(['nvidia-smi','--query-compute-apps=pid','--format=csv,noheader'],capture=True).strip(),'GPU workloads already running: this notebook is for a dedicated deployment host'
 
 def base(c):
-    mounted();run(['apt-get','update'])
+    mounted();run(['bash',REPO/'scripts/configure-ubuntu-mirror.sh',download_settings()['ubuntu_mirror']]);run(['apt-get','update'])
     run(['apt-get','install','-y','ca-certificates','curl','gnupg','python3','python3-venv','jq','openssl','pciutils','openssh-server','tar','util-linux','linux-headers-'+platform.release()])
     for d in ['docker','containerd','models','cache','prometheus','secrets','artifacts','evidence','releases','download-cache']:
         folder=ROOT/d
@@ -140,6 +142,12 @@ def docker(c):
     if (ROOT/'artifacts/docker-managed.json').exists():
         actual=run(DOCKER+['info','--format','{{.DockerRootDir}}'],capture=True).strip()
         assert actual==str(ROOT/'docker')
+        current=load(daemon)
+        mirrors=download_settings()['docker_registry_mirrors']
+        if current.get('registry-mirrors',[])!=mirrors:
+            ensure_stopped();current['registry-mirrors']=mirrors;save(daemon,current)
+            run(['dockerd','--validate','--config-file=/etc/docker/daemon.json']);run(['systemctl','restart','docker'])
+        write('/etc/apt/sources.list.d/docker.sources','Types: deb\nURIs: '+download_settings()['docker_apt_mirror']+'\nSuites: noble\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n')
         wanted=c['docker_version']
         if wanted and package_version('docker-ce')!=wanted:
             ensure_stopped();run(['apt-get','update'])
@@ -152,16 +160,16 @@ def docker(c):
             assert x.returncode==0 and not x.stdout.strip(),'Existing Docker data; do not relocate a populated Engine'
     Path('/etc/apt/keyrings').mkdir(parents=True,exist_ok=True)
     Path('/etc/apt/keyrings').chmod(0o755)
-    run(['curl','-fsSL','https://download.docker.com/linux/ubuntu/gpg','-o','/etc/apt/keyrings/docker.asc'])
+    run(['curl','-fsSL',download_settings()['docker_apt_mirror'].rstrip('/')+'/gpg','-o','/etc/apt/keyrings/docker.asc'])
     Path('/etc/apt/keyrings/docker.asc').chmod(0o644)
-    write('/etc/apt/sources.list.d/docker.sources','Types: deb\nURIs: https://download.docker.com/linux/ubuntu\nSuites: noble\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n')
+    write('/etc/apt/sources.list.d/docker.sources','Types: deb\nURIs: '+download_settings()['docker_apt_mirror']+'\nSuites: noble\nComponents: stable\nSigned-By: /etc/apt/keyrings/docker.asc\n')
     run(['apt-get','update'])
     candidates=run(['apt-cache','madison','docker-ce'],capture=True)
     version=c['docker_version'] or next((x.split('|')[1].strip() for x in candidates.splitlines() if ':29.' in x),'')
     assert version,'Set approved Docker 29.x package version from apt-cache madison'
     run(['apt-get','install','-y','docker-ce='+version,'docker-ce-cli='+version,'containerd.io','docker-buildx-plugin','docker-compose-plugin'])
     run(['systemctl','stop','docker.service','docker.socket','containerd.service'])
-    save(daemon,{'data-root':str(ROOT/'docker'),'storage-driver':'overlay2','features':{'containerd-snapshotter':False},'log-driver':'json-file','log-opts':{'max-size':'20m','max-file':'5'},'live-restore':True,'max-concurrent-downloads':2})
+    save(daemon,{'data-root':str(ROOT/'docker'),'storage-driver':'overlay2','features':{'containerd-snapshotter':False},'log-driver':'json-file','log-opts':{'max-size':'20m','max-file':'5'},'live-restore':True,'max-concurrent-downloads':2,'registry-mirrors':download_settings()['docker_registry_mirrors']})
     conf=run(['containerd','config','default'],capture=True)
     conf,n=re.subn(r'^root\s*=.*$', 'root = '+json.dumps(str(ROOT/'containerd')),conf,count=1,flags=re.M);assert n==1
     write('/etc/containerd/config.toml',conf)
@@ -213,7 +221,7 @@ def model(c):
     lock['model_revision']=c['model_revision']
     save(ROOT/'artifacts/model-download-lock.json',lock)
     run(['python3','-m','venv',ROOT/'tools-hf']);pip=ROOT/'tools-hf/bin/pip'
-    run([pip,'install','--cache-dir',ROOT/'download-cache/pip','huggingface_hub'])
+    run([pip,'install','--index-url',download_settings()['pip_index_url'],'--cache-dir',ROOT/'download-cache/pip','huggingface_hub'])
     write(ROOT/'artifacts/download-packages.txt',run([pip,'freeze'],capture=True))
     run([ROOT/'tools-hf/bin/python',REPO/'scripts/download-model.py','--root',ROOT,'--lock',ROOT/'artifacts/model-download-lock.json'])
 

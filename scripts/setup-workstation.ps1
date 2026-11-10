@@ -5,6 +5,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $Repo = Split-Path $PSScriptRoot -Parent
+$Downloads = Get-Content (Join-Path $Repo 'deployment/downloads.example.json') -Raw | ConvertFrom-Json
+$LocalDownloads = Join-Path $Repo 'downloads.local.json'
+if (Test-Path $LocalDownloads) {
+ foreach ($P in (Get-Content $LocalDownloads -Raw | ConvertFrom-Json).PSObject.Properties) { $Downloads.($P.Name) = $P.Value }
+}
 $Root = Join-Path $env:LOCALAPPDATA 'PhyXiEnterprise'
 New-Item -ItemType Directory -Force $Root | Out-Null
 $Account = "$env:USERDOMAIN\$env:USERNAME"
@@ -12,7 +17,7 @@ icacls $Root /inheritance:r | Out-Null
 icacls $Root /grant:r "${Account}:(OI)(CI)F" 'SYSTEM:(OI)(CI)F' | Out-Null
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
  $Installer = Join-Path $Root 'python-3.12.10-amd64.exe'
- Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile $Installer
+ Invoke-WebRequest $Downloads.python_installer_url -OutFile $Installer
  $Sig = Get-AuthenticodeSignature $Installer
  if ($Sig.Status -ne 'Valid' -or $Sig.SignerCertificate.Subject -notmatch 'Python Software Foundation') { throw 'Python 签名不符' }
  $Process = Start-Process -Wait -PassThru $Installer -ArgumentList '/quiet InstallAllUsers=0 Include_pip=1 Include_launcher=1 InstallLauncherAllUsers=0 PrependPath=1 Include_test=0'
@@ -25,17 +30,17 @@ $Project = Join-Path $Root 'project-app'
 if (Test-Path $Project) { throw 'project-app 已存在；使用既有项目按 docs/workstation.md 接入，避免覆盖' }
 $Commit = '020ae85544dd55ebbc82166dbb7d3573aa7baee2'
 $Zip = Join-Path $Root 'project.zip'
-Invoke-WebRequest "https://github.com/qlsupersky/PhyXiCATIAagent/archive/$Commit.zip" -OutFile $Zip
+Invoke-WebRequest $Downloads.project_archive_url -OutFile $Zip
 Expand-Archive $Zip -DestinationPath $Root
 Move-Item (Join-Path $Root "PhyXiCATIAagent-$Commit") $Project
 py -3.12 -m venv (Join-Path $Root 'venv')
 if ($LASTEXITCODE -ne 0) { throw 'venv 创建失败' }
 $Python = Join-Path $Root 'venv\Scripts\python.exe'
-& $Python -m pip install -r (Join-Path $Project 'requirements.txt') Pillow
+& $Python -m pip install --index-url $Downloads.pip_index_url -r (Join-Path $Project 'requirements.txt') Pillow
 if ($LASTEXITCODE -ne 0) { throw '项目依赖安装失败' }
 & $Python (Join-Path $PSScriptRoot 'install-adapter.py') --project $Project
 if ($LASTEXITCODE -ne 0) { throw '项目连接适配失败' }
-$Meta = Invoke-RestMethod 'https://registry.npmjs.org/@opencode%2fcli-windows-x64/2.2.0'
+$Meta = Invoke-RestMethod ($Downloads.npm_registry.TrimEnd('/') + '/@opencode%2fcli-windows-x64/2.2.0')
 $Archive = Join-Path $Root 'opencode.tgz'
 Invoke-WebRequest $Meta.dist.tarball -OutFile $Archive
 $Hasher = [Security.Cryptography.SHA512]::Create(); $Stream = [IO.File]::OpenRead($Archive)
