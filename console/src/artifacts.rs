@@ -90,6 +90,13 @@ fn hash(p: &Path) -> Result<String, String> {
     }
     Ok(format!("{:x}", h.finalize()))
 }
+fn endpoint(value: &str) -> Result<&str, String> {
+    let base = value.trim_end_matches('/');
+    if !["https://huggingface.co", "https://hf-mirror.com"].contains(&base) {
+        return Err("PHYXI_HF_ENDPOINT 仅支持 Hugging Face 官方站或 hf-mirror.com".into());
+    }
+    Ok(base)
+}
 pub async fn download(
     data: &Path,
     c: &Config,
@@ -99,6 +106,13 @@ pub async fn download(
 ) -> Result<(), String> {
     let s = c.source.as_ref().ok_or("请先填写模型来源")?;
     s.validate()?;
+    let configured =
+        std::env::var("PHYXI_HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".into());
+    let base = endpoint(&configured)?;
+    store.event(
+        id,
+        &format!("模型下载源：{base}；仍校验固定 revision 与 LFS SHA256"),
+    )?;
     if Path::new(&c.model_path) != destination(data, s) {
         return Err("下载路径与来源不匹配".into());
     }
@@ -111,7 +125,7 @@ pub async fn download(
         "--max-time",
         "60",
         &format!(
-            "https://huggingface.co/api/models/{}/revision/{}?blobs=true",
+            "{base}/api/models/{}/revision/{}?blobs=true",
             s.repo, s.revision
         ),
     ]);
@@ -181,7 +195,7 @@ pub async fn download(
             ])
             .arg(&partial)
             .arg(format!(
-                "https://huggingface.co/{}/resolve/{}/{}",
+                "{base}/{}/resolve/{}/{}",
                 s.repo,
                 s.revision,
                 name.replace(' ', "%20")
@@ -198,7 +212,7 @@ pub async fn download(
     }
     fs::write(
         root.join("phyxi-manifest.json"),
-        json!({"source":s,"files":manifest}).to_string(),
+        json!({"source":s,"endpoint":base,"files":manifest}).to_string(),
     )
     .map_err(|e| e.to_string())?;
     store.event(id, "权重准备完成，固定 revision 和逐文件 SHA256 已记录")
@@ -206,6 +220,19 @@ pub async fn download(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn download_endpoint_is_explicit_and_bounded() {
+        assert_eq!(
+            endpoint("https://hf-mirror.com/10"),
+            Err("PHYXI_HF_ENDPOINT 仅支持 Hugging Face 官方站或 hf-mirror.com".into())
+        );
+        assert_eq!(
+            endpoint("https://hf-mirror.com/"),
+            Ok("https://hf-mirror.com")
+        );
+        assert!(endpoint("http://huggingface.co").is_err());
+        assert!(endpoint("https://hf-mirror.com@127.0.0.1").is_err());
+    }
     #[test]
     fn filters_executable_and_traversal_files() {
         for s in [

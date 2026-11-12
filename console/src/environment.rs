@@ -32,7 +32,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
         &r.docker_host,
         "info",
         "--format",
-        "{{json .Runtimes}} | {{.ServerVersion}}",
+        "Docker {{.ServerVersion}} | runtimes: {{range $name, $runtime := .Runtimes}}{{$name}} {{end}}",
     ];
     let (system, driver, docker, toolkit, gateway, tls) = tokio::join!(
         probe("系统", "uname", &["-sm"]),

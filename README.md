@@ -82,14 +82,15 @@ ssh -N -L 8765:127.0.0.1:8765 用户@服务器
 | `PHYXI_LLAMA_SERVER` | 未启用 | CPU 测试引擎绝对路径 |
 | `PHYXI_NGINX` | `nginx` | 网关程序路径 |
 | `PHYXI_ENABLE_HOST_SETUP` | 未启用 | 设为 1 才开放受控主机准备任务 |
+| `PHYXI_HF_ENDPOINT` | `https://huggingface.co` | 可显式设为 `https://hf-mirror.com`，保持固定 revision 与 LFS SHA256 校验 |
 
 - 保存配置不修改运行实例；模型变更要停止网关、停止模型、重新部署、重新验收。当前有停机窗口，无自动切流或回滚。
 - 模型容器必须拥有本状态目录的 owner label；不接管旧 Compose/systemd 或其他平台的实例。CPU/Nginx 只通过当前进程持有的 child handle 停止，不信任磁盘上的 PID。
 - 关闭浏览器任务继续。控制台重启：遗留任务标记 interrupted，Docker 模型可能继续运行；本地 CPU/Nginx 子进程不会自动恢复。检查真实状态后重新操作，不自动重放安装/发布。
 - 取消在阶段边界生效，不立即打断包管理器/下载。失败保留日志；模型启动失败后需要显式停止清理。
-- 下载不执行仓库 Python，不自动启用 trust_remote_code；只支持公开仓库，私有源/镜像源配置暂未提供。
+- 下载不执行仓库 Python，不自动启用 trust_remote_code；只支持公开仓库，私有源认证暂未提供。镜像源仅允许管理员通过启动环境变量选择，不接受页面中的任意下载地址。
 - 日志每任务保留最近 2000 个片段，最多 4096 字符/片段；页面显示最近 30 项任务。任务快照暂未自动清理，近期资源样本限制 120 项。
-- 已完成本地真实 CPU 小模型和网关验证。Ubuntu 安装流程、A10/H20/vLLM、企业真实 CA、Windows/OpenCode 实机集成仍待服务器阶段验证。
+- 已完成本地真实 CPU 小模型和网关验证；Ubuntu 24.04 上的服务安装、已有 Docker/Toolkit 环境准备、证书生成及 A10 CUDA 基础计算已验证。GPU/vLLM 推理、从零安装 Docker/Toolkit、企业真实 CA、Windows/OpenCode 实机集成仍待验证，详见 [服务器验证记录](docs/server-validation.md)。
 
 [架构与职责](docs/architecture.md) · [运维](docs/operations.md) · [开发约定](docs/development.md) · [本地验证记录](docs/local-validation.md)
 

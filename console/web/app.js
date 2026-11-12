@@ -50,7 +50,7 @@ async function refresh() {
     for(const job of jobs){
       const button=document.createElement('button');button.className='job'+(job.id===activeJob?' selected':'');
       const text=document.createElement('span');text.textContent=`${actionNames[job.action]||job.action} · ${job.config.model_name}`;
-      const detail=document.createElement('small');detail.textContent=`${job.created} UTC · ${job.step}`;text.append(detail);
+      const detail=document.createElement('small');detail.textContent=`${job.created} UTC · ${job.step.slice(0,180)}${job.step.length>180?'…':''}`;text.append(detail);
       const state=document.createElement('span');state.className='state '+job.status;state.textContent=labels[job.status]||job.status;button.append(text,state);
       button.onclick=()=>{activeJob=job.id;cursor=0;$('events').textContent='';refresh();};$('jobs').append(button);
     }
