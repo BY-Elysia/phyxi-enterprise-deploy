@@ -15,13 +15,25 @@ pub(crate) async fn catalog_get(State(a): State<App>) -> Result<Json<Value>> {
 pub(crate) async fn catalog_put(
     State(a): State<App>,
     Path((kind, id)): Path<(String, String)>,
-    Json(record): Json<catalog::Record>,
+    Json(mut record): Json<catalog::Record>,
 ) -> Result<Json<Value>> {
     let _permit = a
         .gate
         .clone()
         .try_acquire_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后修改配置".into()))?;
+    if kind == "models" {
+        let mut model: catalog::Model =
+            serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
+        if let Some(source) = model.source {
+            let source = artifacts::resolve(source).await?;
+            model.model_path = artifacts::destination(&a.runtime.data, &source)
+                .display()
+                .to_string();
+            model.source = Some(source);
+        }
+        record.data = serde_json::to_value(model).map_err(|e| e.to_string())?;
+    }
     let mut cat = catalog::Catalog::load(&a.store)?;
     cat.put(&kind, &id, record)?;
     cat.save(&a.store)?;
@@ -61,7 +73,7 @@ pub(crate) async fn deployment_preview(
 ) -> Result<Json<Value>> {
     let cat = catalog::Catalog::load(&a.store)?;
     Ok(Json(
-        json!({"config":cat.compose(&id,&a.runtime.data)?,"composition":cat.snapshot("deployments",&id)?}),
+        json!({"config":prepared_config(&a,&cat,&id).await?,"composition":cat.snapshot("deployments",&id)?}),
     ))
 }
 pub(crate) async fn workspace_export(
@@ -85,23 +97,10 @@ pub(crate) async fn image_status(
     let cat = catalog::Catalog::load(&a.store)?;
     let i: catalog::Image = cat.data("images", &id)?;
     catalog::image_valid(&i.reference)?;
-    let mut cmd = tokio::process::Command::new("docker");
-    cmd.args([
-        "--host",
-        &a.runtime.docker_host,
-        "image",
-        "inspect",
-        "--format",
-        "{{json .}}",
-        &i.reference,
-    ]);
-    match runtime::execute(cmd, None, 15).await {
-        Ok(s) => {
-            let v: Value = serde_json::from_str(&s).map_err(|e| e.to_string())?;
-            Ok(Json(
-                json!({"available":true,"id":v["Id"],"architecture":v["Architecture"],"size_bytes":v["Size"],"labels":v["Config"]["Labels"]}),
-            ))
-        }
+    match a.runtime.local_image(&i.reference).await {
+        Ok(v) => Ok(Json(
+            json!({"available":true,"id":v["Id"],"architecture":v["Architecture"],"size_bytes":v["Size"],"reference":i.reference}),
+        )),
         Err(e) => Ok(Json(json!({"available":false,"detail":e}))),
     }
 }
@@ -146,7 +145,7 @@ pub(crate) async fn resolve_action(
             }
         }
         ("deployments", "start" | "verify") => {
-            let c = cat.compose(id, &a.runtime.data)?;
+            let c = prepared_config(a, &cat, id).await?;
             if action == "verify" {
                 assert_deployment(a, id).await?;
                 if a.gateway.running().await? {
@@ -221,4 +220,31 @@ async fn assert_deployment(a: &App, id: &str) -> Result<()> {
         return Err("当前实例属于其他部署，不能操作".to_string().into());
     }
     Ok(())
+}
+
+async fn prepared_config(a: &App, cat: &catalog::Catalog, id: &str) -> Result<Config> {
+    let draft = cat.compose_draft(id, &a.runtime.data)?;
+    if draft.engine == config::Engine::LlamaCpu {
+        return Ok(cat.compose(id, &a.runtime.data)?);
+    }
+    let mut c = draft;
+    if c.engine != config::Engine::LlamaCpu {
+        let v = a.runtime.local_image(&c.image).await?;
+        c.image = v["Id"].as_str().ok_or("镜像 ID 不存在".to_string())?.into();
+    }
+    c.validate()?;
+    Ok(c)
+}
+pub(crate) async fn model_status(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let cat = catalog::Catalog::load(&a.store)?;
+    let m: catalog::Model = cat.data("models", &id)?;
+    let path = m
+        .source
+        .as_ref()
+        .map(|s| artifacts::destination(&a.runtime.data, s))
+        .unwrap_or_else(|| std::path::PathBuf::from(m.model_path));
+    Ok(Json(artifacts::readiness(&path, m.source.as_ref())))
 }

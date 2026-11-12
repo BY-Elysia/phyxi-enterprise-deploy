@@ -9,6 +9,7 @@ mod config;
 mod environment;
 mod gateway;
 mod host_metrics;
+mod presets;
 mod process;
 mod runtime;
 mod store;
@@ -83,6 +84,8 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route("/presets", get(|| async { Json(presets::list()) }))
+        .route("/models/{id}/status", get(catalog_api::model_status))
         .route("/catalog", get(catalog_get))
         .route(
             "/catalog/{kind}/{id}",

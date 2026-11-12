@@ -5,8 +5,8 @@
 | 配置类型 | 保存内容 | 引用 |
 |---|---|---|
 | models | 服务模型名、服务器路径、可选固定版本下载来源 | 无 |
-| images | 带 SHA256 摘要的镜像地址，可包含可读标签 | 无 |
-| runtimes | vLLM/CPU 后端、上下文、并发、显存比例、解析器、验收能力 | 无 |
+| images | 引擎类型、Docker 标签或摘要地址；执行时固定本地镜像 ID | 无 |
+| runtimes | vLLM/SGLang/CPU 后端、上下文、并发、显存比例、解析器、验收能力 | 无 |
 | deployments | 名称、GPU UUID、端口 | model、image、runtime |
 | gateways | 域名、网段、TLS/CA、监听地址 | deployment |
 | workspaces | 客户端凭据环境变量名 | gateway |
@@ -27,6 +27,8 @@
 
 以下接口均使用控制台 Bearer Token，浏览器不持有 root 权限。
 
+- `GET /api/presets`：只返回运行环境、模型仓库及下载站点预设，不下载资源。
+- `GET /api/models/{id}/status`：检查本地权重与下载清单是否完整。
 - `GET /api/catalog`：读取独立配置库。
 - `PUT /api/catalog/{kind}/{id}`：`{"name":"名称","revision":0,"data":{...}}`；创建修订为 0，更新传读取到的修订号。
 - `DELETE /api/catalog/{kind}/{id}`：被引用或运行中的对象拒绝删除。
@@ -54,3 +56,9 @@ python3 scripts/test-composition.py \
 ```
 
 默认使用隔离的协议模拟器测试 CRUD、引用、修订、组合、归属和持久化。传入三个实际文件路径后测试 <200 MiB GGUF、单并发、512 上下文的真实 CPU 推理，以及 TLS 网关、发布与快照一致性；测试结束清理自身实例。GPU/vLLM 和企业 CA 仍需服务器实机验收。
+
+## 资源准备
+
+`models.source` 包含 repo、revision、endpoint、可选 file。支持官方/HF 镜像站仓库 URL 或 owner/name；main/tag 保存时解析为固定 commit，endpoint 限定官方与 hf-mirror。目录来源需下载清单与实际文件一致，自行准备的本地目录至少检查 config.json 和非空权重文件；完整可加载性由推理引擎判断。
+
+images.engine 与 runtimes.engine 必须一致。GPU 部署读取已存在的本地镜像 ID，以 `--pull never` 和离线模型环境变量启动；缺少资源时要求用户先执行 download / pull_image，不隐式下载。预设与自定义地址使用相同准备流程。验证：`python3 scripts/test-presets.py`。

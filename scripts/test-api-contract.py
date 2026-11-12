@@ -27,7 +27,7 @@ args=sys.argv[1:];urls=[x for x in args if x.startswith('https://huggingface.co/
 if not urls:os.execv(os.environ['PHYXI_REAL_CURL'],[os.environ['PHYXI_REAL_CURL'],*args])
 url=urls[0];data=b'fixture-gguf'
 if '/api/models/' in url:
- revision=url.split('/revision/')[1].split('?')[0];digest='0'*64 if pathlib.Path(os.environ['PHYXI_BAD_DOWNLOAD']).exists() else hashlib.sha256(data).hexdigest()
+ revision=url.split('/revision/')[1].split('?')[0];revision=revision if len(revision)==40 else '1'*40;digest='0'*64 if pathlib.Path(os.environ['PHYXI_BAD_DOWNLOAD']).exists() else hashlib.sha256(data).hexdigest()
  print(json.dumps({'sha':revision,'siblings':[{'rfilename':'tiny.gguf','lfs':{'sha256':digest}}]}))
 else:pathlib.Path(args[args.index('--output')+1]).write_bytes(data)
 '''

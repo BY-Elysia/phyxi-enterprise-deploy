@@ -6,6 +6,8 @@ BINARY=ROOT/'target/debug/phyxi-console'
 FAKE=r'''#!/usr/bin/env python3
 import json,os,pathlib,sys,time
 p=pathlib.Path(os.environ['PHYXI_FAKE_STATE']); args=sys.argv[1:]
+if os.environ.get('PHYXI_DOCKER_CALLS') and pathlib.Path(sys.argv[0]).name=='docker':
+ with open(os.environ['PHYXI_DOCKER_CALLS'],'a') as f:f.write(json.dumps(args)+'\n')
 if pathlib.Path(sys.argv[0]).name=='nvidia-smi':
  if '--query-gpu=uuid,name,memory.total,memory.used' in args: print('GPU-00000000-0000-0000-0000-000000000001, NVIDIA H20, 97871, '+('500' if p.with_suffix('.busy').exists() else '0'))
  sys.exit(0)
@@ -13,15 +15,20 @@ assert args[:2]==['--host','unix:///var/run/docker.sock'];args=args[2:];cmd=args
 if cmd=='ps':
  if p.exists(): print('fake-id')
 elif cmd=='inspect': print(json.dumps([json.loads(p.read_text())]))
+elif cmd=='image':
+ if p.with_suffix('.missing-image').exists():sys.exit(1)
+ if p.with_suffix('.slow').exists():time.sleep(.6)
+ print(json.dumps({'Id':'sha256:'+'b'*64,'Architecture':'amd64','Size':1234}))
 elif cmd=='pull':
  if p.with_suffix('.slow').exists():time.sleep(.6)
+ p.with_suffix('.missing-image').unlink(missing_ok=True)
  print('fake image ready')
 elif cmd=='run':
  assert '--privileged' not in args
  assert args[args.index('--publish')+1].startswith('127.0.0.1:')
  assert args[args.index('--mount')+1].endswith(',readonly')
  labels=dict(args[i+1].split('=',1) for i,x in enumerate(args) if x=='--label')
- image=next(x for x in args if '@sha256:' in x)
+ image=next(x for x in args if '@sha256:' in x or x.startswith('sha256:'))
  p.write_text(json.dumps({'Config':{'Labels':labels,'Image':image},'State':{'Running':True,'Status':'running','StartedAt':'test'}}));print('fake-id')
 elif cmd=='exec':pass
 elif cmd=='logs':print('model ready stdout');print('model ready stderr',file=sys.stderr)
@@ -32,7 +39,7 @@ else:raise RuntimeError(args)
 def main():
  assert BINARY.exists(),'Run cargo build --workspace first'
  with tempfile.TemporaryDirectory(prefix='phyxi-smoke-') as td:
-  d=pathlib.Path(td);bins=d/'bin';bins.mkdir();model=d/'model';model.mkdir();(model/'config.json').write_text('{}')
+  d=pathlib.Path(td);bins=d/'bin';bins.mkdir();model=d/'model';model.mkdir();(model/'config.json').write_text('{}');(model/'model.safetensors').write_bytes(b'fixture')
   for name in ['docker','nvidia-smi']:
    f=bins/name;f.write_text(FAKE);f.chmod(0o755)
   with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]

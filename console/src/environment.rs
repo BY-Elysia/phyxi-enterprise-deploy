@@ -52,12 +52,22 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
     let checks = vec![system, driver, docker, toolkit, gateway, tls];
     let metrics = crate::host_metrics::sample(&r.data).await;
     let gpus = r.gpus().await.ok();
+    let mut engine_name = "vLLM";
     let mut vllm = String::from("未运行 vLLM 实例；版本以镜像或运行实例为准");
     if let Ok(Some(v)) = r.inspect().await {
         if v["State"]["Running"] == true {
             if let Some(id) = v["Id"].as_str() {
+                let package = if v["Config"]["Labels"]["io.phyxi.console.engine"] == "sglang" {
+                    engine_name = "SGLang";
+                    "sglang"
+                } else {
+                    "vllm"
+                };
+                let query = format!(
+                    "import importlib.metadata; print(importlib.metadata.version('{package}'))"
+                );
                 let result = probe(
-                    "vLLM",
+                    engine_name,
                     "docker",
                     &[
                         "--host",
@@ -66,7 +76,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
                         id,
                         "python3",
                         "-c",
-                        "import importlib.metadata; print(importlib.metadata.version('vllm'))",
+                        &query,
                     ],
                 )
                 .await;
@@ -74,7 +84,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
             }
         }
     }
-    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"metrics":metrics,"gpus":gpus,"vllm":vllm,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
+    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"metrics":metrics,"gpus":gpus,"vllm":vllm,"engine_name":engine_name,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
 }
 pub fn plan() -> Vec<&'static str> {
     vec![

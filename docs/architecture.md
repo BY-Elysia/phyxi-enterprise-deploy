@@ -13,7 +13,7 @@ flowchart TB
  TASK --> ENV[环境检查与受控准备]
  TASK --> ART[模型文件与版本清单]
  TASK --> MODEL[模型实例管理]
- MODEL --> V[vLLM / Docker / 指定 GPU]
+ MODEL --> V[vLLM 或 SGLang / Docker / 指定 GPU]
  MODEL --> L[llama.cpp / 本地 CPU 测试]
  TASK --> GW[Nginx / TLS / 工作站认证]
  TASK --> VERIFY[接口验收 / 发布记录 / 导出]
@@ -29,7 +29,7 @@ flowchart TB
 | 借鉴职责 | 当前融合实现 | 边界 |
 |---|---|---|
 | GPUStack 的资源/实例管理 | `runtime.rs`：GPU发现、占用复核、单实例归属、镜像和启动参数、日志 | 只管理所属实例，不安装系统环境 |
-| Xinference 的模型/引擎配置 | `catalog.rs` + `config.rs` + `process.rs`：typed配置、vLLM/CPU后端选择、模型能力验收选项 | 两个后端互斥；CPU仅供轻量本地验证，不假称完整 Xinference 功能 |
+| Xinference 的模型/引擎配置 | `catalog.rs` + `config.rs` + `process.rs`：typed配置、vLLM/SGLang/CPU后端选择、模型能力验收选项 | 三个后端互斥；CPU仅供轻量本地验证，不假称完整 Xinference 功能 |
 | Semaphore 的运维执行 | `tasks.rs` + `environment.rs`：环境检查、固定安装计划、任务日志、失败状态 | 系统任务不另外启动模型；没有任意 shell 输入 |
 | PhyXi 统一控制 | `main.rs` + `store.rs`：鉴权、快照、串行变更、状态和结果 | 不复制三个平台的全部 API/UI；不依赖它们的服务 |
 | Prometheus/Grafana 的观察职责 | `telemetry.rs`：有界近期采样、文本 metrics；引擎指标按需读取 | 不把步骤进度当运行指标；外部监控可选 |

@@ -51,6 +51,7 @@ impl Default for Config {
 pub enum Engine {
     #[default]
     Vllm,
+    Sglang,
     LlamaCpu,
 }
 
@@ -64,8 +65,8 @@ impl Config {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(source) = &self.source {
             source.validate()?;
-            if self.engine == Engine::Vllm && !source.file.is_empty() {
-                return Err("vLLM 使用完整模型目录，指定文件仅供 GGUF 后端".into());
+            if self.engine != Engine::LlamaCpu && !source.file.is_empty() {
+                return Err("GPU 引擎使用完整模型目录，指定文件仅供 GGUF 后端".into());
             }
         }
         if !identifier(&self.model_name) {
@@ -93,19 +94,7 @@ impl Config {
             }
             return Ok(());
         }
-        let (name, digest) = self
-            .image
-            .split_once("@sha256:")
-            .ok_or("镜像必须固定为 name@sha256:摘要")?;
-        if name.is_empty()
-            || !name
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b"/._:-".contains(&b))
-            || digest.len() != 64
-            || !digest.bytes().all(|b| b.is_ascii_hexdigit())
-        {
-            return Err("镜像摘要格式错误".into());
-        }
+        crate::catalog::immutable_image_valid(&self.image)?;
         if self.gpu_uuids.is_empty()
             || self.gpu_uuids.len() > 16
             || self.gpu_uuids.len() != self.gpu_uuids.iter().collect::<HashSet<_>>().len()
