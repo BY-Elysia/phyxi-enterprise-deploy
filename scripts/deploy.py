@@ -11,6 +11,10 @@ DOCKER=['/usr/bin/docker','--host','unix:///var/run/docker.sock']
 def run(cmd, capture=False, **kw):
     print('+', ' '.join(map(str,cmd)), flush=True)
     env=os.environ.copy()
+    if str(cmd[0])=="apt-get":
+        env.update(DEBIAN_FRONTEND="noninteractive",UCF_FORCE_CONFFOLD="1",NEEDRESTART_MODE="l")
+        env.pop("UCF_FORCE_CONFFNEW",None)
+        cmd=[cmd[0],"-o","Dpkg::Options::=--force-confdef","-o","Dpkg::Options::=--force-confold",*cmd[1:]]
     for k in ['DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS_VERIFY','DOCKER_TLS','DOCKER_API_VERSION','DOCKER_CERT_PATH','DOCKER_CONFIG']:env.pop(k,None)
     return subprocess.run(list(map(str,cmd)),check=True,text=True,env=env,stdout=subprocess.PIPE if capture else None,**kw).stdout
 
