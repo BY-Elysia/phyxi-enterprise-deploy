@@ -1,4 +1,10 @@
 mod artifacts;
+mod catalog;
+mod catalog_api;
+use catalog_api::{
+    catalog_delete, catalog_get, catalog_put, deployment_preview, image_status, resolve_action,
+    workspace_export, Scope,
+};
 mod config;
 mod environment;
 mod gateway;
@@ -76,6 +82,14 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route("/catalog", get(catalog_get))
+        .route(
+            "/catalog/{kind}/{id}",
+            axum::routing::put(catalog_put).delete(catalog_delete),
+        )
+        .route("/deployments/{id}/preview", get(deployment_preview))
+        .route("/workspaces/{id}/export", get(workspace_export))
+        .route("/images/{id}/status", get(image_status))
         .route("/config", get(config_get).put(config_save))
         .route("/gpus", get(gpus))
         .route("/environment", get(environment_get))
@@ -177,29 +191,46 @@ async fn gpus(State(a): State<App>) -> Result<Json<Vec<runtime::Gpu>>> {
     Ok(Json(a.runtime.gpus().await?))
 }
 async fn status(State(a): State<App>) -> Result<Json<Value>> {
-    Ok(Json(a.runtime.status().await?))
+    let mut status = a.runtime.status().await?;
+    if let Some(job) = status["job"].as_str() {
+        status["composition"] = a.store.setting(&format!("composition:{job}"))?;
+    }
+    Ok(Json(status))
 }
 async fn logs(State(a): State<App>) -> Result<Json<Value>> {
     Ok(Json(json!({"text":a.runtime.logs().await?})))
 }
-async fn jobs(State(a): State<App>) -> Result<Json<Vec<store::Job>>> {
-    Ok(Json(a.store.jobs()?))
+async fn jobs(State(a): State<App>) -> Result<Json<Value>> {
+    let mut rows = Vec::new();
+    for job in a.store.jobs()? {
+        let mut row = serde_json::to_value(&job).map_err(|e| e.to_string())?;
+        row["composition"] = a.store.setting(&format!("composition:{}", job.id))?;
+        rows.push(row);
+    }
+    Ok(Json(json!(rows)))
 }
 #[derive(Deserialize)]
 struct Cursor {
     #[serde(default)]
     after: i64,
+    #[serde(default)]
+    tail: bool,
 }
 async fn events(
     State(a): State<App>,
     Path(id): Path<String>,
     Query(cursor): Query<Cursor>,
 ) -> Result<Json<Vec<store::Event>>> {
-    Ok(Json(a.store.events(&id, cursor.after)?))
+    Ok(Json(if cursor.tail {
+        a.store.recent_events(&id)?
+    } else {
+        a.store.events(&id, cursor.after)?
+    }))
 }
 async fn action(
     State(a): State<App>,
     Path(action): Path<String>,
+    Query(scope): Query<Scope>,
 ) -> Result<(StatusCode, Json<Value>)> {
     if action == "cancel" {
         if a.gate.available_permits() != 0 {
@@ -217,12 +248,13 @@ async fn action(
             "已有任务运行，请等待或申请取消".into(),
         )
     })?;
-    let c = a.store.config()?;
+    let (c, gateway_config, context) = resolve_action(&a, &action, &scope).await?;
     if action == "start" {
         c.validate()?;
     }
-    let gateway_config = tasks::gateway_config(&a.store)?;
     let id = uuid::Uuid::new_v4().to_string();
+    a.store
+        .set_setting(&format!("composition:{id}"), &context)?;
     a.store.create(&id, &action, &c)?;
     a.cancel.store(false, Ordering::SeqCst);
     let response = json!({"id":id});
@@ -239,7 +271,15 @@ async fn action(
         )
         .await;
         let (status, detail) = match result {
-            Ok(()) => ("succeeded", "执行完成".into()),
+            Ok(()) => {
+                if action == "gateway_start" {
+                    let _ = a.store.set_setting("active_gateway", &context);
+                }
+                if action == "gateway_stop" {
+                    let _ = a.store.set_setting("active_gateway", &Value::Null);
+                }
+                ("succeeded", "执行完成".into())
+            }
             Err(e) => {
                 let state = if e == "任务已取消" {
                     "cancelled"
@@ -320,6 +360,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         gate: Arc::new(Semaphore::new(1)),
         cancel: Arc::new(AtomicBool::new(false)),
     };
+    catalog::migrate(&app.store)?;
     telemetry::start(app.store.clone(), app.runtime.clone());
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     println!(

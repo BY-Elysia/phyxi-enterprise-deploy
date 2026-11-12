@@ -12,6 +12,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use tokio::process::Command;
 pub const ACTIONS: &[&str] = &[
     "download",
+    "pull_image",
     "start",
     "stop",
     "prepare",
@@ -64,6 +65,16 @@ pub async fn run(
             }
             crate::artifacts::download(&runtime.data, c, id, store, cancel).await
         }
+        "pull_image" => {
+            crate::catalog::image_valid(&c.image)?;
+            let mut cmd = Command::new("docker");
+            cmd.args(["--host", &runtime.docker_host, "pull", &c.image]);
+            execute(cmd, Some((store, id.into())), 1800).await?;
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("任务已取消".into());
+            }
+            Ok(())
+        }
         "start" => runtime.job(action, c, id, store, cancel).await,
         "stop" => {
             if gateway.running().await? {
@@ -84,6 +95,9 @@ pub async fn run(
             Ok(())
         }
         "certificate" => {
+            if gateway.running().await? {
+                return Err("请先停止网关，再更换证书".into());
+            }
             gateway.certificates(g).await?;
             store.event(id, "证书已验证并保存，私钥不会通过页面返回")
         }
@@ -141,7 +155,7 @@ pub async fn run(
                     .as_array()
                     .cloned()
                     .unwrap_or_default();
-                releases.insert(0,json!({"id":id,"created_unix":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs(),"model":active,"gateway":g,"report":report,"export_directory":export}));
+                releases.insert(0,json!({"id":id,"created_unix":std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e|e.to_string())?.as_secs(),"model":active,"gateway":g,"composition":store.setting(&format!("composition:{id}"))?,"report":report,"export_directory":export}));
                 releases.truncate(20);
                 store.set_setting("releases", &Value::Array(releases))?;
                 store.event(id, "发布记录与工作站材料已保存；令牌仅保存在服务器受控目录")?;

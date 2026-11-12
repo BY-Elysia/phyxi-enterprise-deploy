@@ -50,7 +50,43 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
         probe("证书工具", "openssl", &["version"])
     );
     let checks = vec![system, driver, docker, toolkit, gateway, tls];
-    serde_json::json!({"checks":checks,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
+    let (memory, disk, load) = if cfg!(target_os = "macos") {
+        tokio::join!(
+            probe("内存分页", "vm_stat", &[]),
+            probe("磁盘", "df", &["-h", "/"]),
+            probe("系统负载", "uptime", &[])
+        )
+    } else {
+        tokio::join!(
+            probe("内存", "free", &["-m"]),
+            probe("磁盘", "df", &["-h", "/"]),
+            probe("系统负载", "uptime", &[])
+        )
+    };
+    let gpus = r.gpus().await.ok();
+    let mut vllm = String::from("未运行 vLLM 实例；版本以镜像或运行实例为准");
+    if let Ok(Some(v)) = r.inspect().await {
+        if v["State"]["Running"] == true {
+            if let Some(id) = v["Id"].as_str() {
+                let result = probe(
+                    "vLLM",
+                    "docker",
+                    &[
+                        "--host",
+                        &r.docker_host,
+                        "exec",
+                        id,
+                        "python3",
+                        "-c",
+                        "import importlib.metadata; print(importlib.metadata.version('vllm'))",
+                    ],
+                )
+                .await;
+                vllm = result.detail;
+            }
+        }
+    }
+    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"monitoring":[memory,disk,load],"gpus":gpus,"vllm":vllm,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
 }
 pub fn plan() -> Vec<&'static str> {
     vec![

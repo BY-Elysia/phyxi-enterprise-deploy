@@ -43,6 +43,27 @@ impl Store {
         self.0.lock().map_err(|e|e.to_string())?.execute("INSERT INTO settings VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value.to_string()]).map_err(|e|e.to_string())?;
         Ok(())
     }
+    pub fn has_legacy_config(&self) -> Result<bool, String> {
+        self.0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .query_row("SELECT EXISTS(SELECT 1 FROM config)", [], |r| r.get(0))
+            .map_err(|e| e.to_string())
+    }
+    pub fn recent_events(&self, id: &str) -> Result<Vec<Event>, String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        let mut statement=c.prepare("SELECT seq,message FROM (SELECT seq,message FROM events WHERE job_id=?1 ORDER BY seq DESC LIMIT 200) ORDER BY seq").map_err(|e|e.to_string())?;
+        let rows = statement
+            .query_map([id], |r| {
+                Ok(Event {
+                    seq: r.get(0)?,
+                    message: r.get(1)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
     pub fn job_config(&self, id: &str) -> Result<Config, String> {
         let c = self.0.lock().map_err(|e| e.to_string())?;
         let s: String = c
