@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const titles={deployments:'模型部署',models:'模型配置',images:'模型镜像',runtimes:'运行参数',gateways:'企业网关',workspaces:'工作区',environment:'服务器环境',tasks:'操作记录',reports:'验收与发布'};
-const descriptions={deployments:'创建部署对象，组合模型、镜像和运行参数，再分配 GPU 与端口。',models:'独立管理模型来源与权重位置，可被多个部署方案引用。',images:'独立管理固定版本的推理镜像，按需拉取到当前服务器。',runtimes:'复用 vLLM 运行参数；本地测试可选受限 CPU 后端。',gateways:'选择部署作为后端，独立配置企业域名、证书与访问规则。',workspaces:'选择企业网关，生成客户端接入配置。凭据通过环境变量引用。',environment:'当前服务器的依赖版本、显卡、内存与磁盘状态。',tasks:'每次操作的状态、日志与当时使用的配置快照。',reports:'查看真实接口验收结果与发布记录。'};
+const titles={deployments:'部署实例',models:'模型权重',images:'推理镜像',runtimes:'vLLM 参数',gateways:'企业网关',workspaces:'工作区',environment:'服务器环境',tasks:'操作记录',reports:'验收与发布'};
+const descriptions={deployments:'把模型权重、推理镜像和运行参数组合成服务，选择 GPU 与端口，再启动或停止。',models:'选择要运行的模型：保存权重文件路径或下载来源。这里不设置 vLLM 运行参数。',images:'管理装有 vLLM 及其依赖的 Docker 镜像，不包含模型权重；例如 vLLM 0.11 的运行环境。',runtimes:'设置模型怎么运行：上下文长度、并发、显存比例等。也支持本地 CPU 测试参数。',gateways:'选择部署作为后端，独立配置企业域名、证书与访问规则。',workspaces:'选择企业网关，生成客户端接入配置。凭据通过环境变量引用。',environment:'当前服务器的依赖版本、显卡、内存与磁盘状态。',tasks:'每次操作的状态、日志与当时使用的配置快照。',reports:'查看真实接口验收结果与发布记录。'};
 const actionNames={start:'启动部署',stop:'停止实例',download:'下载权重',pull_image:'拉取镜像',certificate:'准备证书',gateway_start:'启动网关',gateway_stop:'停止网关',verify:'接口验收',publish:'验收并发布',prepare:'安装环境'};
 const states={running:'执行中',succeeded:'成功',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},editing=null,connected=false,busy=false,jobs=[],activeJob='',runtime={};
@@ -10,7 +10,7 @@ const fields={
  models:[['model_name','服务模型名','text','phyxi-model'],['model_path','服务器权重路径 / GGUF 文件','text','/srv/phyxi/models/model'],['source_repo','下载仓库（可选）','optional',''],['source_revision','固定版本（40 位 commit）','optional',''],['source_file','GGUF 文件（可选）','optional','']],
  images:[['reference','镜像地址（固定 SHA256 摘要）','text','']],
  runtimes:[['engine','推理后端','engine','vllm'],['max_model_len','上下文长度','number',8192],['max_num_seqs','最大并发序列','number',8],['gpu_memory_utilization','显存使用比例','decimal',0.85],['tool_parser','工具解析器（可选）','optional',''],['reasoning_parser','思考解析器（可选）','optional',''],['verify_tools','验收工具调用','checkbox',false],['verify_images','验收图片理解','checkbox',false]],
- deployments:[['model','模型配置','ref:models',''],['image','镜像配置（CPU 可留空）','ref:images',''],['runtime','运行参数','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','本机 API 端口','number',18000]],
+ deployments:[['model','模型权重','ref:models',''],['image','推理镜像（CPU 可留空）','ref:images',''],['runtime','运行参数方案','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','本机 API 端口','number',18000]],
  gateways:[['deployment','后端部署对象','ref:deployments',''],['domain','企业域名','text','localhost'],['bind_ip','监听 IPv4','text','127.0.0.1'],['port','HTTPS 端口','number',18443],['allowed_cidrs','允许来源网段（逗号分隔）','text','127.0.0.1/32'],['tls_mode','证书模式','tls','self_signed'],['cert_file','证书链路径','optional',''],['key_file','私钥路径','optional',''],['ca_file','CA 文件路径','optional','']],
  workspaces:[['gateway','企业网关','ref:gateways',''],['credential_env','客户端凭据环境变量名','text','PHYXI_API_KEY']]
 };
@@ -37,7 +37,48 @@ async function submit(action,kind,id){if(['stop','gateway_stop','prepare'].inclu
 async function renderProgress(){const r=record();const job=fields[view]&&r?jobs.find(j=>j.composition?.kind===view&&j.composition?.id===selection[view]):null;$('inline-progress').hidden=!job;if(job){$('progress-status').textContent=`${actionNames[job.action]||job.action} · ${states[job.status]||job.status} · ${job.step}`;const expectedKind=view,expectedId=selection[view];const events=await api(`/jobs/${job.id}/events?tail=true`);if(view!==expectedKind||selection[view]!==expectedId)return;$('progress-log').textContent=events.map(e=>e.message).join('\n');}}
 async function refresh(){if(!connected||busy)return;busy=true;try{jobs=await api('/jobs');$('jobs').replaceChildren();for(const job of jobs){const b=button(`${actionNames[job.action]||job.action} · ${job.composition?.name||'旧版 / 服务器操作'} · ${states[job.status]||job.status}`,()=>{activeJob=job.id;return showJob(job);});b.className='job';$('jobs').append(b);}if(activeJob){const job=jobs.find(j=>j.id===activeJob);if(job)await showJob(job);}try{runtime=await api('/status');const owner=runtime.composition?.name||'';for(const label of document.querySelectorAll('.deployment-state'))label.textContent=runtime.composition?.id===label.dataset.id?(runtime.state==='running'?'运行中':runtime.state):'未运行';$('live-state').textContent=`实例：${runtime.state==='running'?'运行中':runtime.state==='absent'?'未部署':runtime.state} ${owner}`;}catch(e){$('live-state').textContent='运行时不可用';}await renderProgress();if(view==='environment'&&activeJob){const j=jobs.find(j=>j.id===activeJob);if(j?.action==='prepare'){$('host-progress').hidden=false;$('host-progress').textContent=j.step+'\n'+(await api(`/jobs/${j.id}/events?tail=true`)).map(e=>e.message).join('\n');}}}finally{busy=false;}}
 async function showJob(job){const events=await api(`/jobs/${job.id}/events?tail=true`);$('events').textContent=`${states[job.status]} · ${job.step}\n\n`+events.map(e=>e.message).join('\n')+'\n\n配置快照\n'+JSON.stringify(job.composition||job.config,null,2);}
-async function inspect(){const h=await api('/environment');$('host-platform').textContent=h.platform==='macos'?'Mac 本地预览 · NVIDIA 依赖不适用于 CPU 测试':'服务器平台：'+h.platform;$('host-checks').replaceChildren();for(const c of h.checks){const row=document.createElement('div');row.className='check-row';const text=document.createElement('span');text.textContent=c.name;const detail=document.createElement('span');const na=h.platform==='macos'&&['显卡驱动','NVIDIA Toolkit'].includes(c.name);detail.textContent=na?'不适用 · 本地 CPU 模式':(c.ready?'已就绪 · ':'不可用 · ')+c.detail;row.append(text,detail);$('host-checks').append(row);}$('host-gpus').textContent=h.gpus?.length?h.gpus.map(g=>`${g.name} · ${g.uuid}\n显存 ${g.used_mib} / ${g.total_mib} MiB`).join('\n'):'未检测到 NVIDIA GPU';$('host-vllm').textContent=h.vllm;$('host-monitoring').textContent=h.monitoring.map(m=>m.name+'\n'+m.detail).join('\n\n');$('host-plan').replaceChildren();for(const s of h.plan){const li=document.createElement('li');li.textContent=s;$('host-plan').append(li);}$('prepare').disabled=!h.host_setup_enabled||h.platform!=='linux';$('host-policy').textContent=h.host_setup_enabled?h.notes:'此实例未启用系统安装。仅 Ubuntu 22.04/24.04 的受控服务可安装缺失依赖；本地预览不执行系统安装。';const samples=await api('/telemetry');const last=samples?.at(-1);if(last)$('console-metrics').textContent=`控制台进程：${(last.console_rss_kib/1024).toFixed(1)} MiB · CPU ${last.console_cpu_percent.toFixed(1)}%（不含推理进程）`;}
+function bytes(n){if(n==null)return '暂无数据';return (n/1024**3).toFixed(1)+' GiB';}
+function metricCard(title,value,description,percent){
+ const card=document.createElement('article');card.className='host-card';
+ const label=document.createElement('h4');label.textContent=title;
+ const main=document.createElement('strong');main.className='metric-value';main.textContent=value;
+ const note=document.createElement('p');note.className='hint';note.textContent=description;
+ card.append(label,main);
+ if(Number.isFinite(percent)){const bar=document.createElement('progress');bar.max=100;bar.value=Math.max(0,Math.min(100,percent));bar.setAttribute('aria-label',title+'占用比例');card.append(bar);}
+ card.append(note);return card;
+}
+function dependencyCard(c,platform){
+ const na=platform==='macos'&&['显卡驱动','NVIDIA Toolkit'].includes(c.name);
+ const names={'系统':'操作系统','显卡驱动':'NVIDIA 显卡驱动','容器引擎':'Docker 容器引擎','NVIDIA Toolkit':'NVIDIA 容器工具','企业网关':'Nginx 企业网关','证书工具':'OpenSSL 证书工具'};
+ const detail=c.detail||'';
+ let version=detail.match(/(?:nginx\/|OpenSSL\s+|Docker\s+|version\s+)([v\d][\w.+-]*)/i)?.[1];
+ if(c.name==='系统')version=platform==='macos'?'macOS':platform==='linux'?'Linux':platform;
+ if(c.name==='显卡驱动')version=detail.split(',')[1]?.trim();
+ const card=metricCard(names[c.name]||c.name,na?'不适用':!c.ready?'未就绪':version||'已就绪',na?'本地 CPU 测试不需要此组件。':c.ready?'已检测到此组件。':'未安装或当前无法访问，请查看诊断详情。');
+ card.classList.add('dependency-card');const badge=document.createElement('span');badge.className='state '+(na?'':c.ready?'succeeded':'failed');badge.textContent=na?'无需安装':c.ready?'正常':'需检查';card.prepend(badge);
+ if(!na){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='诊断详情';const raw=document.createElement('pre');raw.textContent=detail;details.append(summary,raw);card.append(details);}return card;
+}
+async function inspect(){
+ const h=await api('/environment'),m=h.metrics||{};
+ const time=m.sampled_unix?new Date(m.sampled_unix*1000).toLocaleTimeString():'未知';
+ $('host-platform').textContent=(h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
+ $('host-metrics').replaceChildren();
+ const mem=m.memory,disk=m.disk;
+ $('host-metrics').append(metricCard('内存占用',mem?bytes(mem.used_bytes)+' / '+bytes(mem.total_bytes):'暂无数据',mem?(mem.estimated?'估算占用；空闲及可回收约 ':'可用 ')+bytes(mem.available_bytes):'无法读取系统内存信息。',mem?mem.used_bytes/mem.total_bytes*100:null));
+ $('host-metrics').append(metricCard('数据目录所在磁盘',disk?bytes(disk.available_bytes)+' 可用':'暂无数据',disk?'已用 '+bytes(disk.used_bytes)+' / 总计 '+bytes(disk.total_bytes):'无法读取磁盘信息。',disk?.used_percent));
+ $('host-metrics').append(metricCard('系统负载 · 最近 1 分钟',m.load?m.load[0].toFixed(2):'暂无数据',m.load?`5 分钟 ${m.load[1].toFixed(2)} · 15 分钟 ${m.load[2].toFixed(2)} · ${m.logical_cpus??'未知'} 个逻辑核心。负载不是 CPU 使用率。`:'无法读取系统负载。'));
+ const samples=await api('/telemetry'),last=samples?.at(-1);
+ $('host-metrics').append(metricCard('控制台自身占用',last?(last.console_rss_kib/1024).toFixed(1)+' MiB':'暂无数据',last?`CPU ${last.console_cpu_percent.toFixed(1)}% · 不含模型推理进程。`:'等待首次采样。'));
+ $('host-gpus').replaceChildren();
+ if(h.gpus?.length){for(const g of h.gpus)$('host-gpus').append(metricCard(g.name,(g.used_mib/1024).toFixed(1)+' / '+(g.total_mib/1024).toFixed(1)+' GiB',g.uuid,g.total_mib?g.used_mib/g.total_mib*100:null));}
+ else $('host-gpus').append(metricCard(h.platform==='macos'?'本地 CPU 模式':'NVIDIA 显卡',h.platform==='macos'?'无需分配显卡':'未检测到显卡',h.platform==='macos'?'当前可使用 llama.cpp 进行小模型测试；服务器 vLLM 部署需要 NVIDIA GPU。':'请检查显卡驱动和设备是否可用。'));
+ $('host-checks').replaceChildren();for(const c of h.checks)$('host-checks').append(dependencyCard(c,h.platform));
+ const version=/^\d+\.\d+[^\s]*$/.test((h.vllm||'').trim());
+ const engine=metricCard('vLLM 推理引擎',version?h.vllm.trim():'未运行 / 未识别',version?'当前运行实例中的实际版本。':'未运行时，版本由所选推理镜像决定；无需在控制台主机额外安装 vLLM。');
+ if(!version&&h.vllm&&!h.vllm.startsWith('未运行')){const d=document.createElement('details');const s=document.createElement('summary');s.textContent='诊断详情';const p=document.createElement('pre');p.textContent=h.vllm;d.append(s,p);engine.append(d);}$('host-checks').append(engine);
+ $('host-plan').replaceChildren();for(const s of h.plan){const li=document.createElement('li');li.textContent=s;$('host-plan').append(li);}
+ $('prepare').disabled=!h.host_setup_enabled||h.platform!=='linux';$('host-policy').textContent=h.host_setup_enabled?h.notes:'此实例未启用系统安装。仅 Ubuntu 22.04/24.04 的受控服务可安装缺失依赖；本地预览不执行系统安装。';
+}
 $('inspect').onclick=safe(inspect);$('prepare').onclick=safe(()=>submit('prepare'));$('cancel').onclick=safe(async()=>{await api('/actions/cancel',{method:'POST'});notice('已申请在安全边界取消。');});
 async function connect(){token=$('token').value.trim();await load();sessionStorage.setItem('phyxi-token',token);connected=true;$('connection').open=false;notice('已连接');await refresh();if(view==='environment')await inspect();}
 $('connect').onclick=safe(connect);showView(location.hash.slice(1));if(token)connect().catch(e=>notice(e.message,true));setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
