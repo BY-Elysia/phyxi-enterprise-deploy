@@ -1,5 +1,8 @@
 //! Direct Docker/vLLM adapter. This is the only module that owns model processes.
-use crate::{config::Config, store::Store};
+use crate::{
+    config::{Config, Engine},
+    store::Store,
+};
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -19,6 +22,8 @@ const OWNER: &str = "io.phyxi.console.owner";
 pub struct Runtime {
     pub owner: String,
     pub docker_host: String,
+    pub data: std::path::PathBuf,
+    pub local: Arc<tokio::sync::Mutex<Option<crate::process::Managed>>>,
 }
 #[derive(Debug, Serialize)]
 pub struct Gpu {
@@ -48,7 +53,7 @@ async fn read<R: tokio::io::AsyncRead + Unpin>(
     }
     Ok(out)
 }
-async fn execute(
+pub(crate) async fn execute(
     mut cmd: Command,
     log: Option<(Arc<Store>, String)>,
     seconds: u64,
@@ -81,6 +86,15 @@ fn smi(args: &[&str]) -> Command {
     c
 }
 impl Runtime {
+    pub fn new(owner: String, docker_host: String, data: std::path::PathBuf) -> Self {
+        Self {
+            owner,
+            docker_host,
+            data,
+            local: Arc::new(tokio::sync::Mutex::new(None)),
+        }
+    }
+
     fn docker(&self, args: &[String]) -> Command {
         let mut c = Command::new("docker");
         for key in [
@@ -150,6 +164,9 @@ impl Runtime {
         Ok(())
     }
     pub async fn status(&self) -> Result<Value, String> {
+        if let Some(p) = self.local.lock().await.as_mut() {
+            return p.status();
+        }
         match self.inspect().await? {
             None => Ok(serde_json::json!({"state":"absent"})),
             Some(v) => Ok(
@@ -158,6 +175,9 @@ impl Runtime {
         }
     }
     pub async fn logs(&self) -> Result<String, String> {
+        if let Some(p) = self.local.lock().await.as_ref() {
+            return p.logs();
+        }
         if self.inspect().await?.is_none() {
             return Ok("尚无模型容器".into());
         }
@@ -259,6 +279,13 @@ impl Runtime {
             store.event(id, text)
         };
         if action == "stop" {
+            let mut local = self.local.lock().await;
+            if let Some(p) = local.as_mut() {
+                p.stop().await?;
+                *local = None;
+                return Ok(());
+            }
+            drop(local);
             step("停止本控制台管理的模型")?;
             if self.inspect().await?.is_some() {
                 self.call(
@@ -272,6 +299,12 @@ impl Runtime {
             return Ok(());
         }
         c.validate()?;
+        if self.local.lock().await.is_some() {
+            return Err("已有本地模型，请先停止".into());
+        }
+        if c.engine == Engine::LlamaCpu {
+            return crate::process::start_local(self, c, id, store, cancel).await;
+        }
         step("1/4 检查模型目录、GPU 和容器")?;
         if !std::path::Path::new(&c.model_path)
             .join("config.json")
@@ -334,10 +367,11 @@ mod tests {
     use super::*;
     #[test]
     fn command_is_scoped_and_parameters_are_arguments() {
-        let r = Runtime {
-            owner: "test".into(),
-            docker_host: "unix:///var/run/docker.sock".into(),
-        };
+        let r = Runtime::new(
+            "test".into(),
+            "unix:///var/run/docker.sock".into(),
+            std::env::temp_dir(),
+        );
         let c = crate::config::fixture();
         let a = r.run_args(&c, "job");
         assert!(a.contains(&"127.0.0.1:18000:8000".into()));

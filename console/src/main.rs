@@ -1,6 +1,13 @@
+mod artifacts;
 mod config;
+mod environment;
+mod gateway;
+mod process;
 mod runtime;
 mod store;
+mod tasks;
+mod telemetry;
+mod verification;
 
 use axum::{
     extract::{Path, Query, Request, State},
@@ -31,6 +38,7 @@ use tokio::sync::Semaphore;
 struct App {
     store: Arc<Store>,
     runtime: Runtime,
+    gateway: gateway::Gateway,
     token: String,
     gate: Arc<Semaphore>,
     cancel: Arc<AtomicBool>,
@@ -70,6 +78,12 @@ fn router(app: App) -> Router {
     let api = Router::new()
         .route("/config", get(config_get).put(config_save))
         .route("/gpus", get(gpus))
+        .route("/environment", get(environment_get))
+        .route("/gateway", get(gateway_get).put(gateway_save))
+        .route("/reports", get(reports))
+        .route("/telemetry", get(telemetry_get))
+        .route("/metrics", get(metrics))
+        .route("/model-metrics", get(model_metrics))
         .route("/status", get(status))
         .route("/logs", get(logs))
         .route("/jobs", get(jobs))
@@ -103,10 +117,58 @@ fn router(app: App) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(16384))
         .with_state(app)
 }
+async fn model_metrics(State(a): State<App>) -> Result<Json<Value>> {
+    let c = tasks::active_config(&a.runtime, &a.store).await?;
+    let (status, text) =
+        verification::request(&a.runtime.data, &c, None, "/metrics", None, true).await?;
+    if status != 200 {
+        return Err(Error(
+            StatusCode::BAD_REQUEST,
+            "当前引擎未提供 metrics，请检查引擎启动选项".into(),
+        ));
+    }
+    Ok(Json(json!({"text":text})))
+}
+async fn telemetry_get(State(a): State<App>) -> Result<Json<Value>> {
+    Ok(Json(a.store.setting("telemetry")?))
+}
+async fn metrics(State(a): State<App>) -> Result<String> {
+    Ok(telemetry::prometheus(&a.store)?)
+}
+async fn environment_get(State(a): State<App>) -> Json<Value> {
+    Json(environment::inspect(&a.runtime).await)
+}
+async fn gateway_get(State(a): State<App>) -> Result<Json<Value>> {
+    Ok(Json(
+        json!({"config":tasks::gateway_config(&a.store)?,"running":a.gateway.running().await?}),
+    ))
+}
+async fn gateway_save(
+    State(a): State<App>,
+    Json(c): Json<gateway::GatewayConfig>,
+) -> Result<Json<Value>> {
+    c.validate()?;
+    a.store.set_setting(
+        "gateway_config",
+        &serde_json::to_value(c).map_err(|e| e.to_string())?,
+    )?;
+    Ok(Json(json!({"saved":true})))
+}
+async fn reports(State(a): State<App>) -> Result<Json<Value>> {
+    Ok(Json(
+        json!({"verification":a.store.setting("last_verification")?,"releases":a.store.setting("releases")?}),
+    ))
+}
 async fn config_get(State(a): State<App>) -> Result<Json<Config>> {
     Ok(Json(a.store.config()?))
 }
-async fn config_save(State(a): State<App>, Json(c): Json<Config>) -> Result<Json<Value>> {
+async fn config_save(State(a): State<App>, Json(mut c): Json<Config>) -> Result<Json<Value>> {
+    if let Some(source) = &c.source {
+        source.validate()?;
+        c.model_path = artifacts::destination(&a.runtime.data, source)
+            .display()
+            .to_string();
+    }
     c.validate()?;
     a.store.save(&c)?;
     Ok(Json(json!({"saved":true})))
@@ -146,7 +208,7 @@ async fn action(
         a.cancel.store(true, Ordering::SeqCst);
         return Ok((StatusCode::ACCEPTED, Json(json!({"cancelling":true}))));
     }
-    if !["start", "stop"].contains(&action.as_str()) {
+    if !tasks::ACTIONS.contains(&action.as_str()) {
         return Err(Error(StatusCode::NOT_FOUND, "未知操作".into()));
     }
     let permit = a.gate.clone().try_acquire_owned().map_err(|_| {
@@ -159,16 +221,23 @@ async fn action(
     if action == "start" {
         c.validate()?;
     }
+    let gateway_config = tasks::gateway_config(&a.store)?;
     let id = uuid::Uuid::new_v4().to_string();
     a.store.create(&id, &action, &c)?;
     a.cancel.store(false, Ordering::SeqCst);
     let response = json!({"id":id});
     tokio::spawn(async move {
         let _permit = permit;
-        let result = a
-            .runtime
-            .job(&action, &c, &id, a.store.clone(), a.cancel.clone())
-            .await;
+        let result = tasks::run(
+            &a.runtime,
+            &a.gateway,
+            &action,
+            (&c, &gateway_config),
+            &id,
+            a.store.clone(),
+            a.cancel.clone(),
+        )
+        .await;
         let (status, detail) = match result {
             Ok(()) => ("succeeded", "执行完成".into()),
             Err(e) => {
@@ -190,7 +259,7 @@ async fn action(
     });
     Ok((StatusCode::ACCEPTED, Json(response)))
 }
-fn private_file(path: &std::path::Path) -> std::io::Result<String> {
+pub(crate) fn private_file(path: &std::path::Path) -> std::io::Result<String> {
     match fs::read_to_string(path) {
         Ok(v) => {
             let v = v.trim().to_string();
@@ -216,8 +285,11 @@ fn private_file(path: &std::path::Path) -> std::io::Result<String> {
         Err(e) => Err(e),
     }
 }
-#[tokio::main]
+#[tokio::main(worker_threads = 2)]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--prepare-host") {
+        return environment::prepare_host().await.map_err(Into::into);
+    }
     let data = PathBuf::from(std::env::var("PHYXI_STATE_DIR").unwrap_or(".phyxi-console".into()));
     fs::create_dir_all(&data)?;
     #[cfg(unix)]
@@ -225,6 +297,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&data, fs::Permissions::from_mode(0o700))?;
     }
+    let data = fs::canonicalize(data)?;
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -241,14 +314,13 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .parse()?;
     let app = App {
         store: Arc::new(Store::open(&data.join("state.db"))?),
-        runtime: Runtime {
-            owner: private_file(&data.join("owner"))?,
-            docker_host: host,
-        },
+        gateway: gateway::Gateway::new(&data),
+        runtime: Runtime::new(private_file(&data.join("owner"))?, host, data.clone()),
         token: private_file(&data.join("token"))?,
         gate: Arc::new(Semaphore::new(1)),
         cancel: Arc::new(AtomicBool::new(false)),
     };
+    telemetry::start(app.store.clone(), app.runtime.clone());
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
     println!(
         "PhyXi console: http://127.0.0.1:{}\n访问令牌文件: {}",
@@ -270,10 +342,12 @@ mod tests {
     fn app() -> App {
         App {
             store: Arc::new(Store::open(std::path::Path::new(":memory:")).unwrap()),
-            runtime: Runtime {
-                owner: "test".into(),
-                docker_host: "unix:///var/run/docker.sock".into(),
-            },
+            gateway: gateway::Gateway::new(&std::env::temp_dir()),
+            runtime: Runtime::new(
+                "test".into(),
+                "unix:///var/run/docker.sock".into(),
+                std::env::temp_dir(),
+            ),
             token: "test-token".into(),
             gate: Arc::new(Semaphore::new(1)),
             cancel: Arc::new(AtomicBool::new(false)),

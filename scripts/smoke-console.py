@@ -36,7 +36,7 @@ def main():
   for name in ['docker','nvidia-smi']:
    f=bins/name;f.write_text(FAKE);f.chmod(0o755)
   with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
-  env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_FAKE_STATE=str(d/'container'),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PATH=str(bins)+os.pathsep+env['PATH'])
+  env=os.environ.copy();env.update(PHYXI_ENABLE_HOST_SETUP='0',PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_FAKE_STATE=str(d/'container'),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PATH=str(bins)+os.pathsep+env['PATH'])
   proc=None;token=''
   def boot():
    nonlocal proc,token
@@ -67,6 +67,11 @@ def main():
    boot();assert 'PhyXi' in call('/',auth=False)
    call('/api/config',auth=False,expected=401);call('/api/actions/start','POST',auth=False,expected=401)
    assert len(call('/api/gpus'))==1
+   call('/api/environment',auth=False,expected=401)
+   assert len(call('/api/environment')['checks'])==6
+   bad_gateway=call('/api/gateway')['config'];bad_gateway['domain']='evil;return 200';call('/api/gateway','PUT',bad_gateway,expected=400)
+   denied=call('/api/actions/prepare','POST',expected=202)['id'];assert wait(denied)['status']=='failed'
+   assert call('/api/reports')['releases'] is None
    cfg=call('/api/config');call('/api/config','PUT',cfg,expected=400)
    cfg.update(model_path=str(model),image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'])
    call('/api/config','PUT',cfg)

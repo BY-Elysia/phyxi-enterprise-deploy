@@ -18,3 +18,5 @@ downloads.local.json
 /.phyxi-console/
 *.db-wal
 *.db-shm
+
+/.local-test/

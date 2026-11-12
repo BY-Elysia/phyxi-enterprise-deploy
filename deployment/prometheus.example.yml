@@ -1,0 +1,15 @@
+# Optional: not required for the control plane. Token file stays on the monitoring host.
+scrape_configs:
+  - job_name: phyxi-console
+    scrape_interval: 30s
+    metrics_path: /api/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /secure/phyxi-console.token
+    static_configs:
+      - targets: ['127.0.0.1:8765']
+  - job_name: phyxi-model
+    scrape_interval: 30s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['127.0.0.1:18000']

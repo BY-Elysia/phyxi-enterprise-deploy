@@ -22,11 +22,33 @@ impl Store {
     pub fn open(path: &Path) -> Result<Self, String> {
         let c = Connection::open(path).map_err(|e| e.to_string())?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+        CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, action TEXT NOT NULL, status TEXT NOT NULL, step TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP, config TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, message TEXT NOT NULL);
         UPDATE jobs SET status='interrupted', step='控制台重启；请检查运行状态，停止后再部署' WHERE status='running';").map_err(|e|e.to_string())?;
         Ok(Self(Mutex::new(c)))
+    }
+    pub fn setting(&self, key: &str) -> Result<serde_json::Value, String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        match c.query_row("SELECT value FROM settings WHERE key=?1", [key], |r| {
+            r.get::<_, String>(0)
+        }) {
+            Ok(v) => serde_json::from_str(&v).map_err(|e| e.to_string()),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(serde_json::Value::Null),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+    pub fn set_setting(&self, key: &str, value: &serde_json::Value) -> Result<(), String> {
+        self.0.lock().map_err(|e|e.to_string())?.execute("INSERT INTO settings VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key,value.to_string()]).map_err(|e|e.to_string())?;
+        Ok(())
+    }
+    pub fn job_config(&self, id: &str) -> Result<Config, String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        let s: String = c
+            .query_row("SELECT config FROM jobs WHERE id=?1", [id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
+        serde_json::from_str(&s).map_err(|e| e.to_string())
     }
     pub fn config(&self) -> Result<Config, String> {
         let c = self.0.lock().map_err(|e| e.to_string())?;
