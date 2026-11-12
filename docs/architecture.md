@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart TB
- UI[四步控制台] --> API[HTTP / 鉴权 / 配置]
+ UI[侧边导航 / 部署列表 / 配置抽屉] --> API[HTTP / 鉴权 / 配置]
  API --> TASK[统一任务编排 tasks.rs]
  TASK --> ENV[环境检查与受控准备]
  TASK --> ART[模型文件与版本清单]
