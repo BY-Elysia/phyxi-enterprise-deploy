@@ -1,3 +1,5 @@
+> 历史方案资料：此文描述旧部署流程。Notebook 已移除，新版入口与边界见仓库根目录 README。
+
 # 企业 Windows 工作站接入
 
 服务端 Notebook 生成 `/srv/phyxi/client-export/`。通过企业受控渠道为该工作站分发 `company-ca.pem` 和 `cad-ws-01.token`；不分发 backend-key 或 server.key。

@@ -16,14 +16,3 @@ class DownloadTests(unittest.TestCase):
     self.assertEqual(m.settings()['pip_index_url'],'https://pypi.org/simple')
     (r/'downloads.local.json').write_text(json.dumps({'hf_endpoint':'http://example.org'}))
     with self.assertRaises(AssertionError):m.settings()
- def test_notebook_download_fields_match(self):
-  import ast
-  fields=set(json.loads((ROOT/'deployment/downloads.example.json').read_text()))
-  n=json.loads((ROOT/'notebooks/01-deploy-glm53-flash.ipynb').read_text())
-  count=0
-  for cell in n['cells']:
-   if cell['cell_type']!='code':continue
-   for node in ast.walk(ast.parse(''.join(cell['source']))):
-    if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='DOWNLOADS' for t in node.targets):
-     self.assertEqual(set(ast.literal_eval(node.value)),fields);count+=1
-  self.assertGreater(count,0)

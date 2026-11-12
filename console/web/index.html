@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PhyXi · 部署控制台</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><header><div><span class="mark">P</span><strong>PhyXi</strong><span class="muted"> / 部署控制台</span></div><span class="badge">单机 · v0.1</span></header>
+<main><section class="intro"><div><p class="eyebrow">MODEL OPERATIONS</p><h1>配置、执行、观察。</h1><p class="muted">一个实例，明确的 GPU 分配，可追溯的执行记录。</p></div><div id="runtime" class="status" role="status">尚未连接</div></section>
+<section id="connection" class="panel"><div class="connection"><label>访问令牌<input id="token" type="password" autocomplete="off" placeholder="读取服务器状态目录中的 token 文件"></label><button id="connect">连接控制台</button></div><p class="hint">默认仅本机访问。远程使用 SSH 隧道；令牌只保存在当前标签页会话中。</p></section>
+<p id="notice" role="status" aria-live="polite"></p>
+<div class="layout"><section class="panel"><div class="heading"><h2>部署配置</h2><span class="badge">草稿</span></div><form id="config"><div class="fields">
+<label>服务模型名<input name="model_name" required placeholder="phyxi-model"></label><label>本机 API 端口<input name="port" type="number" min="1024" max="65535" required></label>
+<label class="wide">本地模型目录<input name="model_path" required placeholder="/srv/phyxi/models/model"></label>
+<label class="wide">vLLM 镜像（固定摘要）<input name="image" required placeholder="vllm/vllm-openai@sha256:…"></label>
+</div><p class="hint">使用已下载的完整模型目录。服务仅发布到 127.0.0.1；修改配置后需停止旧实例再部署。</p>
+<div class="heading section"><h3>GPU 分配</h3><button type="button" id="refresh-gpu" class="quiet">刷新设备</button></div><div id="gpus" class="gpu-list">连接后读取 GPU</div><p id="selection" class="hint">尚未选择设备</p>
+<div class="fields section"><label>上下文上限<input name="max_model_len" type="number" min="512" max="1048576" required></label><label>最大序列数<input name="max_num_seqs" type="number" min="1" max="256" required></label><label>显存预算比例<input name="gpu_memory_utilization" type="number" step="0.01" min="0.1" max="0.95" required></label><label>张量并行 TP<input name="tensor_parallel" type="number" min="1" max="16" required readonly></label></div>
+<details class="section"><summary>模型专用参数</summary><div class="fields section"><label>工具解析器<input name="tool_parser" placeholder="可选，例如 glm47"></label><label>思考解析器<input name="reasoning_parser" placeholder="可选，例如 glm47"></label></div><p class="hint">解析器必须由所选镜像支持。首版使用引擎默认 dtype / KV 类型；特定模型需要额外参数时先完成适配。</p></details>
+<div class="actions section"><button type="submit">保存配置</button><button type="button" id="start" class="primary">保存并部署</button><button type="button" id="stop" class="danger">停止实例</button></div>
+</form></section>
+<div class="side"><section class="panel"><div class="heading"><h2>执行记录</h2><button id="cancel" class="quiet">申请取消</button></div><p class="hint">取消在安全边界生效。若已创建容器，取消后仍需停止实例。</p><div id="jobs" class="jobs">暂无记录</div></section>
+<section class="panel"><div class="heading"><h2>执行日志</h2><span id="job-label" class="muted">选择任务</span></div><pre id="events" tabindex="0">等待任务</pre></section></div></div>
+<section class="panel section"><div class="heading"><h2>模型运行日志</h2><button id="refresh-logs" class="quiet">刷新最近日志</button></div><pre id="model-logs" tabindex="0">部署后可查看模型加载与推理日志。</pre></section>
+<footer>配置保存不影响运行实例 · 任务在服务端执行 · 健康检查不等于业务验收</footer></main></body></html>

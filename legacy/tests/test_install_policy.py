@@ -22,14 +22,3 @@ class InstallPolicyTests(unittest.TestCase):
   with patch.object(d.subprocess,'run') as run:
    d.run(['docker','ps'])
    self.assertEqual(run.call_args.args[0],['docker','ps'])
- def test_bootstrap_policy_matches_deployer(self):
-  source=(ROOT/'scripts/bootstrap-notebook.sh').read_text()
-  # Execute only the actual policy and install lines, with a fake apt-get.
-  lines=[x for x in source.splitlines() if x.startswith(('export DEBIAN_FRONTEND=','unset UCF_FORCE_CONFFNEW','apt-get -o '))]
-  self.assertEqual(len(lines),3)
-  with tempfile.TemporaryDirectory() as t:
-   p=Path(t);fake=p/'apt-get';out=p/'args.json'
-   fake.write_text('#!/usr/bin/env python3\nimport json,os,sys\nopen(os.environ["INSTALL_POLICY_OUTPUT"],"w").write(json.dumps([sys.argv[1:],dict(os.environ)]))\n');fake.chmod(0o700)
-   env=os.environ.copy();env.update(PATH=str(p)+':'+env['PATH'],INSTALL_POLICY_OUTPUT=str(out),UCF_FORCE_CONFFNEW='1')
-   subprocess.run(['bash','-eu','-c','\n'.join(lines)],env=env,check=True)
-   args,values=json.loads(out.read_text());self.check_policy(args,values)

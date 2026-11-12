@@ -1,0 +1,2 @@
+#!/bin/sh
+exec python3 scripts/check-dev-note.py --staged --message-file "$1"

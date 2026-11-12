@@ -13,3 +13,8 @@ evidence/
 client-export/
 
 downloads.local.json
+
+/target/
+/.phyxi-console/
+*.db-wal
+*.db-shm

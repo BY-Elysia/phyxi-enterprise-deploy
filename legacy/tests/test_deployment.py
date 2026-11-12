@@ -41,7 +41,7 @@ class DeploymentTests(unittest.TestCase):
    self.assertEqual(model['environment']['VLLM_USE_RUST_FRONTEND'],'0')
    self.assertEqual(model['environment']['TP_SIZE'],'8')
    self.assertEqual(parsed['services']['gateway']['ports'][0]['host_ip'],c['intranet_ip'])
- def test_notebook_controls_reach_rendered_files(self):
+ def test_configuration_controls_reach_rendered_files(self):
   with tempfile.TemporaryDirectory() as td:
    root=Path(td)/'custom-data';(root/'artifacts').mkdir(parents=True)
    (root/'artifacts/images.json').write_text(json.dumps({'vllm':'vllm/vllm-openai@sha256:'+'a'*64,'nginx':'nginx@sha256:'+'b'*64,'prometheus':'prom/prometheus@sha256:'+'c'*64}))
@@ -61,16 +61,6 @@ class DeploymentTests(unittest.TestCase):
    for flag,value in [('--requests','5'),('--max-tokens','777'),('--concurrency','2'),('--reasoning-effort','high')]:self.assertEqual(cmd[cmd.index(flag)+1],value)
   with patch.object(deploy,'run') as call:
    deploy.verify(c);cmd=list(map(str,call.call_args_list[0].args[0]));self.assertEqual(cmd[cmd.index('--max-tokens')+1],'3000')
- def test_notebook_stages_and_no_outputs(self):
-  nb=json.loads((ROOT/'notebooks/01-deploy-glm53-flash.ipynb').read_text())
-  self.assertEqual(nb['nbformat'],4)
-  text=''
-  for i,c in enumerate(nb['cells']):
-   self.assertIn('id',c)
-   if c['cell_type']=='code':
-    self.assertIsNone(c['execution_count']);self.assertEqual(c['outputs'],[])
-    code=''.join(c['source']);compile(code,f'cell-{i}','exec');text+=code
-  for s in deploy.STAGES:self.assertIn(f'stage("{s}")',text)
  def test_adapter_is_version_guarded(self):
   import hashlib
   v=json.loads((ROOT/'integrations/adapter-version.json').read_text())

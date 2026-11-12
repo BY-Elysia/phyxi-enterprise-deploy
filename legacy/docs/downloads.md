@@ -1,3 +1,5 @@
+> 历史方案资料：此文描述旧部署流程。Notebook 已移除，新版入口与边界见仓库根目录 README。
+
 # 下载源与生效位置
 
 默认使用公共镜像，不需要搭建镜像仓库。Notebook 第 1 节 `DOWNLOADS` 字典直接修改，执行后保存为 `downloads.local.json`（不提交 Git）。下载阶段重新读取此文件；Windows 工作站将该文件放在仓库根目录，安装脚本同样读取。未配置时使用 `deployment/downloads.example.json`。

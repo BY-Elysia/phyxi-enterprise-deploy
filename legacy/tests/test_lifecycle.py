@@ -97,12 +97,4 @@ class LifecycleTests(unittest.TestCase):
      self.assertIn('cad-ws-02',mapping.read_text())
      self.assertTrue(mapping.read_text().startswith(original))
     finally:os.umask(previous)
- def test_notebook_configuration_fields_are_complete(self):
-  nb=json.loads((REPO/'notebooks/01-deploy-glm53-flash.ipynb').read_text());s=''.join(nb['cells'][4]['source']);defaults=json.loads((REPO/'deployment/config.example.json').read_text())
-  import ast
-  tree=ast.parse(s)
-  assignment=next(x for x in tree.body if isinstance(x,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='OVERRIDES' for t in x.targets))
-  self.assertEqual(set(ast.literal_eval(assignment.value)),set(defaults))
-  table=''.join(nb['cells'][3]['source'])
-  for key in defaults:self.assertIn('`'+key+'`',table)
 if __name__=='__main__':unittest.main()
