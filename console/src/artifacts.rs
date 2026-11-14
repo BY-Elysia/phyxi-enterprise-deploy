@@ -206,6 +206,10 @@ pub async fn download(
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let s = c.source.as_ref().ok_or("请先填写模型来源")?;
+    store.set_setting(
+        &format!("progress:{id}"),
+        &json!({"kind":"weights","phase":"正在获取模型文件清单"}),
+    )?;
     s.validate()?;
     let configured = source_endpoint(s)?;
     let base = configured.as_str();
@@ -229,8 +233,11 @@ pub async fn download(
             s.repo, s.revision
         ),
     ]);
-    let meta: Value =
-        serde_json::from_str(&execute(cmd, None, 65).await?).map_err(|e| e.to_string())?;
+    let metadata = tokio::select! {
+        result=execute(cmd,None,65)=>result?,
+        _=wait_cancel(&cancel)=>return Err("任务已取消".into()),
+    };
+    let meta: Value = serde_json::from_str(&metadata).map_err(|e| e.to_string())?;
     if meta["sha"].as_str() != Some(s.revision.as_str()) {
         return Err("仓库返回的 revision 不匹配".into());
     }
@@ -252,6 +259,12 @@ pub async fn download(
         .join(s.repo.replace('/', "--"))
         .join(&s.revision);
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let total = files
+        .iter()
+        .map(|f| file_size(f))
+        .collect::<Option<Vec<_>>>()
+        .and_then(|v| v.into_iter().try_fold(0u64, |a, b| a.checked_add(b)));
+    let mut completed = 0u64;
     let mut manifest = vec![];
     for (index, f) in files.iter().enumerate() {
         if cancel.load(Ordering::SeqCst) {
@@ -275,7 +288,7 @@ pub async fn download(
             "running",
             &format!("权重文件 {}/{}：{name}", index + 1, files.len()),
         )?;
-        store.set_setting(&format!("progress:{id}"), &json!({"kind":"weights","source":base,"file":name,"file_index":index+1,"file_total":files.len(),"phase":"下载并校验当前文件"}))?;
+        store.set_setting(&format!("progress:{id}"), &json!({"kind":"weights","source":base,"file":name,"file_index":index+1,"file_total":files.len(),"phase":"下载当前文件","bytes_ready":completed,"bytes_total":total,"file_bytes":0,"file_size":file_size(f),"files_completed":index}))?;
         let expected = f["lfs"]["sha256"].as_str();
         if !target.exists() || expected.is_none() || hash(&target)?.as_str() != expected.unwrap() {
             let partial = target.with_extension("phyxi-part");
@@ -301,7 +314,32 @@ pub async fn download(
                 s.revision,
                 name.replace(' ', "%20")
             ));
-            execute(cmd, Some((store.clone(), id.into())), 7210).await?;
+            let transfer = execute(cmd, Some((store.clone(), id.into())), 7210);
+            tokio::pin!(transfer);
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+            let mut previous = (std::time::Instant::now(), 0u64);
+            loop {
+                tokio::select! {
+                    result=&mut transfer=>{result?;break;},
+                    _=wait_cancel(&cancel)=>return Err("任务已取消".into()),
+                    _=interval.tick()=>{
+                        let bytes=fs::metadata(&partial).map(|m|m.len()).unwrap_or(0);
+                        let elapsed=previous.0.elapsed().as_secs_f64();
+                        let speed=if elapsed>=0.5 {Some(bytes.saturating_sub(previous.1) as f64/elapsed)} else {None};
+                        update_progress(&store,id,completed,bytes,index,speed,"下载当前文件")?;
+                        previous=(std::time::Instant::now(),bytes);
+                    }
+                }
+            }
+            update_progress(
+                &store,
+                id,
+                completed,
+                fs::metadata(&partial).map_err(|e| e.to_string())?.len(),
+                index,
+                None,
+                "校验当前文件",
+            )?;
             if let Some(expected) = expected {
                 if hash(&partial)? != expected {
                     return Err(format!("文件 SHA256 不匹配：{name}"));
@@ -309,6 +347,21 @@ pub async fn download(
             }
             fs::rename(&partial, &target).map_err(|e| e.to_string())?;
         }
+        let size = fs::metadata(&target).map_err(|e| e.to_string())?.len();
+        update_progress(
+            &store,
+            id,
+            completed,
+            size,
+            index + 1,
+            None,
+            if index + 1 == files.len() {
+                "全部文件已校验"
+            } else {
+                "当前文件已校验"
+            },
+        )?;
+        completed = completed.saturating_add(size);
         manifest.push(json!({"file":name,"sha256":hash(&target)?,"bytes":fs::metadata(&target).map_err(|e|e.to_string())?.len()}));
     }
     fs::write(
@@ -317,6 +370,42 @@ pub async fn download(
     )
     .map_err(|e| e.to_string())?;
     store.event(id, "权重准备完成，固定 revision 和逐文件 SHA256 已记录")
+}
+async fn wait_cancel(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+fn file_size(value: &Value) -> Option<u64> {
+    value["lfs"]["size"]
+        .as_u64()
+        .or_else(|| value["size"].as_u64())
+}
+fn update_progress(
+    store: &Store,
+    id: &str,
+    completed: u64,
+    current: u64,
+    files_completed: usize,
+    speed: Option<f64>,
+    phase: &str,
+) -> Result<(), String> {
+    let key = format!("progress:{id}");
+    let mut p: crate::download_progress::Progress =
+        serde_json::from_value(store.setting(&key)?).map_err(|e| e.to_string())?;
+    p.file_bytes = current;
+    p.files_completed = files_completed;
+    p.bytes_ready = Some(completed.saturating_add(current));
+    p.speed_bps = speed;
+    p.phase = phase.into();
+    if let Some(size) = p.file_size.filter(|s| *s > 0) {
+        p.percent = Some((current as f64 / size as f64 * 100.0).min(100.0));
+    }
+    p.updated_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    store.set_setting(&key, &serde_json::to_value(p).map_err(|e| e.to_string())?)
 }
 #[cfg(test)]
 mod tests {

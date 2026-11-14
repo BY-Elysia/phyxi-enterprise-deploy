@@ -72,7 +72,13 @@ def main():
    slow=smoke.FAKE.replace("if p.with_suffix('.slow').exists():time.sleep(.6)","if p.with_suffix('.slow').exists():time.sleep(4)")
    (bins/'docker').write_text(slow);(d/'container.slow').touch()
    ids=[call('/actions/pull_image?kind=images&id=parallel-'+key,'POST',status=202)['id'] for key in ['a','b','c']]
-   call('/actions/pull_image?kind=images&id=parallel-a','POST',status=409)
+   put('models','new-model-during-download',saved['data'])
+   put('images','new-during-download',{'engine':'vllm','reference':'registry.example/new:test'})
+   put('images','parallel-a',{'engine':'vllm','reference':'registry.example/changed:test'},1)
+   snapshot=next(j for j in call('/jobs') if j['id']==ids[0])
+   assert snapshot['config']['image']=='registry.example/a:test'
+   put('images','duplicate-original',{'engine':'vllm','reference':'registry.example/a:test'})
+   call('/actions/pull_image?kind=images&id=duplicate-original','POST',status=409)
    call('/actions/pull_image?kind=images&id=parallel-d','POST',status=409)
    call('/actions/stop','POST',status=409)
    call('/actions/cancel','POST',status=409)

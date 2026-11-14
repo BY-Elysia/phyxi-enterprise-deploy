@@ -18,11 +18,6 @@ pub(crate) async fn catalog_put(
     Path((kind, id)): Path<(String, String)>,
     Json(mut record): Json<catalog::Record>,
 ) -> Result<Json<Value>> {
-    let _permit = a
-        .gate
-        .clone()
-        .try_write_owned()
-        .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后修改配置".into()))?;
     if kind == "workspaces" && id.starts_with("system-") {
         return Err("system- 前缀用于系统内部工作区".to_string().into());
     }
@@ -38,6 +33,7 @@ pub(crate) async fn catalog_put(
         }
         record.data = serde_json::to_value(model).map_err(|e| e.to_string())?;
     }
+    let _catalog = a.catalog_gate.lock().await;
     let mut cat = catalog::Catalog::load(&a.store)?;
     cat.put(&kind, &id, record)?;
     cat.save(&a.store)?;
@@ -71,6 +67,7 @@ pub(crate) async fn catalog_delete(
     {
         return Err("请先停止该网关".to_string().into());
     }
+    let _catalog = a.catalog_gate.lock().await;
     let mut cat = catalog::Catalog::load(&a.store)?;
     cat.delete(&kind, &id)?;
     cat.save(&a.store)?;
@@ -303,6 +300,7 @@ pub(crate) async fn certificate_upload(
         .clone()
         .try_write_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中".into()))?;
+    let _catalog = a.catalog_gate.lock().await;
     let mut cat = catalog::Catalog::load(&a.store)?;
     let mut record = cat.get("gateways", &id)?.clone();
     if record.revision != body.revision {

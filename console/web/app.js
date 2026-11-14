@@ -185,11 +185,16 @@ function taskProgressCard(job){
  const expanded=Array.from(document.querySelectorAll('.download-progress')).find(el=>el.dataset.jobId===job.id)?.querySelector('details')?.open;const card=document.createElement('article');card.className='download-progress';card.dataset.jobId=job.id;
  const head=document.createElement('div');head.className='heading';const title=document.createElement('strong');title.textContent=actionNames[job.action]||job.action;const badge=document.createElement('span');badge.className='state '+job.status;badge.textContent=states[job.status]||job.status;head.append(title,badge);card.append(head);
  const step=document.createElement('p');step.className='hint';step.textContent=taskStep(job);card.append(step);
+ const draft=catalog[job.composition?.kind]?.[job.composition?.id];if(draft&&job.composition?.revision&&draft.revision!==job.composition.revision){const version=document.createElement('p');version.className='hint';version.textContent=`任务使用配置 r${job.composition.revision} · 当前草稿 r${draft.revision}`;card.append(version);}
  const p=job.progress;const running=['running','pending'].includes(job.status);
  if(p){
   const phase=document.createElement('p');phase.className='hint';phase.textContent=p.kind==='weights'?`文件 ${p.file_index} / ${p.file_total} · ${p.file}`:running?(p.phase||'等待下载信息'):job.status==='succeeded'?'镜像准备完成':'最后下载阶段：'+(p.phase||'等待下载信息');card.append(phase);
   if(p.kind==='weights'){
-   const value=document.createElement('strong');value.className='download-number';value.textContent=Number.isFinite(p.percent)?`${p.percent.toFixed(1)}%`:'正在获取文件进度';card.append(value);
+   const known=Number.isFinite(p.bytes_total)&&p.bytes_total>0&&Number.isFinite(p.bytes_ready);
+   const value=document.createElement('strong');value.className='download-number';value.textContent=known?`${Math.min(100,p.bytes_ready/p.bytes_total*100).toFixed(1)}%`:Number.isFinite(p.percent)?`当前文件 ${p.percent.toFixed(1)}%`:'正在获取文件进度';card.append(value);
+   const amount=document.createElement('p');amount.className='download-amount';amount.textContent=known?`${downloadBytes(p.bytes_ready)} / ${downloadBytes(p.bytes_total)}`:`当前文件 ${downloadBytes(p.file_bytes||0)}`;card.append(amount);
+   const info=document.createElement('p');info.className='hint';info.textContent=`已校验 ${p.files_completed||0} / ${p.file_total||0} 个文件 · ${p.phase||'等待下载'}`;card.append(info);
+   if(running&&Number.isFinite(p.speed_bps)){const speed=document.createElement('p');speed.className='hint';speed.textContent='当前速度 '+downloadBytes(Date.now()/1000-(p.updated_unix||0)<5?p.speed_bps:0)+'/s';card.append(speed);}
   }
   if(p.kind==='image'){
    const layers=Object.entries(p.layers||{}),ready=layers.filter(([,state])=>['已就绪','已缓存'].includes(state)).length;

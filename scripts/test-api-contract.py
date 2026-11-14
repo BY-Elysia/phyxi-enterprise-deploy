@@ -22,15 +22,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(('127.0.0.1',port),Handler).serve_forever()
 '''
 CURL=r'''#!/usr/bin/env python3
-import sys,json,hashlib,os,pathlib
+import sys,json,hashlib,os,pathlib,time
 args=sys.argv[1:];urls=[x for x in args if x.startswith('https://huggingface.co/')]
 if not urls:os.execv(os.environ['PHYXI_REAL_CURL'],[os.environ['PHYXI_REAL_CURL'],*args])
 url=urls[0];data=b'fixture-gguf'
 if '/api/models/' in url:
  revision=url.split('/revision/')[1].split('?')[0];revision=revision if len(revision)==40 else '1'*40;digest='0'*64 if pathlib.Path(os.environ['PHYXI_BAD_DOWNLOAD']).exists() else hashlib.sha256(data).hexdigest()
- print(json.dumps({'sha':revision,'siblings':[{'rfilename':'tiny.gguf','lfs':{'sha256':digest}}]}))
+ print(json.dumps({'sha':revision,'siblings':[{'rfilename':'tiny.gguf','lfs':{'sha256':digest,'size':len(data)}}]}))
 else:
- pathlib.Path(args[args.index('--output')+1]).write_bytes(data)
+ target=pathlib.Path(args[args.index('--output')+1])
+ if pathlib.Path(os.environ['PHYXI_BAD_DOWNLOAD']).with_suffix('.slow').exists():
+  target.write_bytes(data[:5]);time.sleep(10)
+ target.write_bytes(data)
  print('#### 100.0%',file=sys.stderr)
 '''
 def port():
@@ -60,7 +63,24 @@ def main():
    downloaded=task('download');assert downloaded['status']=='succeeded'
    assert downloaded['progress']['kind']=='weights' and downloaded['progress']['percent']==100.0
    assert downloaded['progress']['file_index']==downloaded['progress']['file_total']==1
+   assert downloaded['progress']['bytes_ready']==downloaded['progress']['bytes_total']==len(b'fixture-gguf')
+   assert downloaded['progress']['files_completed']==1
    cached=pathlib.Path(call('/config')['model_path']);assert cached.read_bytes()==b'fixture-gguf';assert cached.parent.joinpath('phyxi-manifest.json').exists()
+   download['source']['revision']='c'*40;call('/config','PUT',download);(d/'bad-download.slow').touch()
+   pending=call('/actions/download','POST')['id']
+   for _ in range(50):
+    running=next(j for j in call('/jobs') if j['id']==pending)
+    if running.get('progress',{}).get('file_bytes')==5:break
+    time.sleep(.1)
+   assert running['status']=='running' and running['progress']['bytes_ready']==5 and running['progress']['bytes_total']==len(b'fixture-gguf'),running
+   call('/actions/cancel?job_id='+pending,'POST')
+   for _ in range(30):
+    stopped=next(j for j in call('/jobs') if j['id']==pending)
+    if stopped['status']=='cancelled':break
+    time.sleep(.1)
+   assert stopped['status']=='cancelled',stopped
+   assert not pathlib.Path(call('/config')['model_path']).exists()
+   (d/'bad-download.slow').unlink();assert task('download')['status']=='succeeded'
    (d/'bad-download').touch();download['source']['revision']='b'*40;call('/config','PUT',download);assert task('download')['status']=='failed';assert not pathlib.Path(call('/config')['model_path']).exists()
    c=call('/config');c.update(engine='llama_cpu',source=None,model_path=str(d/'dummy.gguf'),max_num_seqs=1,max_model_len=512,verify_tools=True,verify_images=True,port=port());call('/config','PUT',c)
    assert task('start')['status']=='succeeded';assert task('verify')['status']=='succeeded'

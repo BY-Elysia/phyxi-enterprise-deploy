@@ -58,6 +58,7 @@ struct App {
     token: String,
     admin: Option<Arc<admin::Admin>>,
     gate: Arc<RwLock<()>>,
+    catalog_gate: Arc<tokio::sync::Mutex<()>>,
     jobs: Arc<job_control::Jobs>,
 }
 struct Error(StatusCode, String);
@@ -587,6 +588,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             admin::Admin::load(&data)?
         },
         gate: Arc::new(RwLock::new(())),
+        catalog_gate: Arc::new(tokio::sync::Mutex::new(())),
         jobs: Arc::new(job_control::Jobs::default()),
     };
     if !executor::proxy() {
@@ -634,6 +636,7 @@ mod tests {
             token: "test-token".into(),
             admin: None,
             gate: Arc::new(RwLock::new(())),
+            catalog_gate: Arc::new(tokio::sync::Mutex::new(())),
             jobs: Arc::new(job_control::Jobs::default()),
         }
     }
