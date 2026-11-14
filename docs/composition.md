@@ -27,7 +27,7 @@
 
 企业模式使用管理员会话 Cookie，写操作另需 CSRF；仅本地兼容模式接受控制台 Bearer Token。浏览器不直接接触 Docker socket。
 
-- `GET /api/presets`：只返回运行环境、模型仓库及下载站点预设，不下载资源。
+- `GET /api/presets`：只返回推理引擎镜像、模型仓库及下载站点预设，不下载资源。
 - `GET /api/models/{id}/status`：检查本地权重与下载清单是否完整。
 - `GET /api/catalog`：读取独立配置库。
 - `PUT /api/catalog/{kind}/{id}`：`{"name":"名称","revision":0,"data":{...}}`；创建修订为 0，更新传读取到的修订号。

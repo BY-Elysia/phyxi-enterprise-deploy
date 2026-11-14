@@ -135,7 +135,7 @@ impl Runtime {
             )
             .await
             .map_err(|e| {
-                format!("运行环境尚未准备好，请先在运行环境页面下载或手动 docker pull。{e}")
+                format!("推理引擎镜像尚未准备好，请先在推理引擎镜像页面下载或手动 docker pull。{e}")
             })?;
         let v: Value = serde_json::from_str(&raw).map_err(|e| format!("无法读取本地镜像：{e}"))?;
         crate::catalog::immutable_image_valid(v["Id"].as_str().ok_or("本地镜像缺少 ID")?)?;
@@ -392,7 +392,7 @@ impl Runtime {
             return Err("已有模型容器；请先停止，配置修改不会自动中断服务".into());
         }
         self.idle(c).await?;
-        step("2/4 检查已下载的运行环境（不会自动下载）")?;
+        step("2/4 检查已下载的推理引擎镜像（不会自动下载）")?;
         self.local_image(&c.image).await?;
         if cancel.load(Ordering::SeqCst) {
             return Err("任务已取消".into());

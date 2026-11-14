@@ -2,8 +2,8 @@
 use serde_json::{json, Value};
 pub fn list() -> Value {
     json!({"images":[
- {"id":"vllm","name":"vLLM · 官方运行环境","engine":"vllm","reference":"vllm/vllm-openai:v0.11.0","note":"NVIDIA GPU 用；先下载，再部署。版本可自行修改。"},
- {"id":"sglang","name":"SGLang · 官方运行环境","engine":"sglang","reference":"lmsysorg/sglang:v0.5.5","note":"NVIDIA GPU 用；需搭配 SGLang 运行参数。"}],
+ {"id":"vllm","name":"vLLM · 官方推理引擎镜像","engine":"vllm","reference":"vllm/vllm-openai:v0.11.0","note":"NVIDIA GPU 用；先下载，再部署。版本可自行修改。"},
+ {"id":"sglang","name":"SGLang · 官方推理引擎镜像","engine":"sglang","reference":"lmsysorg/sglang:v0.5.5","note":"NVIDIA GPU 用；需搭配 SGLang 推理参数。"}],
  "models":[
  {"id":"qwen-small","name":"Qwen3 · 0.6B","repo":"Qwen/Qwen3-0.6B","model_name":"Qwen3-0.6B","revision":"main","note":"较小模型，适合服务器流程试用；不是 Mac CPU GGUF。"},
  {"id":"qwen-8b","name":"Qwen3 · 8B","repo":"Qwen/Qwen3-8B","model_name":"Qwen3-8B","revision":"main","note":"根据显存选择上下文与并发，下载前确认磁盘空间。"},

@@ -171,7 +171,7 @@ impl Catalog {
         let image = if r.engine != Engine::LlamaCpu {
             let image = self.data::<Image>("images", &d.image)?;
             if image.engine != r.engine {
-                return Err("运行环境与参数的推理引擎不一致，请同时选择 vLLM 或 SGLang".into());
+                return Err("推理引擎镜像与参数的推理引擎不一致，请同时选择 vLLM 或 SGLang".into());
             }
             image.reference
         } else {
