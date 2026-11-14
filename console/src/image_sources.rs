@@ -122,7 +122,7 @@ pub fn save(data: &Path, settings: &Sources) -> Result<(), String> {
 pub fn info(data: &Path) -> Result<Value, String> {
     let c = load(data)?;
     Ok(
-        json!({"effective_gateway_image":c.resolve(&c.gateway_image)?,"config":c,"note":"默认使用 DaoCloud 公共镜像服务，仅路由 Nginx/vLLM/SGLang 预设。自定义完整仓库地址原样使用；失败不静默切换其他公共源。"}),
+        json!({"default_gateway_image":NGINX,"effective_gateway_image":c.resolve(&c.gateway_image)?,"config":c,"note":"默认使用 DaoCloud 公共镜像服务，仅路由 Nginx/vLLM/SGLang 预设。自定义完整仓库地址原样使用；失败不静默切换其他公共源。"}),
     )
 }
 pub async fn pull(
