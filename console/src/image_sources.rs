@@ -133,6 +133,10 @@ pub async fn pull(
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let target = load(&r.data)?.resolve(reference)?;
+    store.set_setting(
+        &format!("progress:{id}"),
+        &json!({"kind":"image","source":target,"phase":"正在连接镜像仓库，等待镜像层信息"}),
+    )?;
     store.event(id,&format!("下载镜像：{reference}\n实际来源：{target}\n仅准备镜像，不启动模型；已完成的镜像层由 Docker 缓存复用。"))?;
     let mut c = Command::new("docker");
     c.args(["--host", &r.docker_host, "pull", &target]);

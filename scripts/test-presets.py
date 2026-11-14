@@ -52,7 +52,8 @@ def main():
    dep={'model':'local','image':'v','runtime':'r','gpu_uuids':['GPU-00000000-0000-0000-0000-000000000001'],'port':18000};put('deployments','d',dep)
    (d/'container.missing-image').touch();call('/actions/start?kind=deployments&id=d','POST',status=400)
    assert not any(cmd[0]=='pull' for cmd in commands())
-   task('pull_image','images','v');assert call('/images/v/status')['available']
+   pulled=task('pull_image','images','v');assert pulled['progress']['layers']=={'abcdef123456':'已就绪'};assert 'pending' not in pulled['progress'];assert pulled['progress']['percent'] is None
+   assert call('/images/v/status')['available']
    assert commands()[-1]  # inspect executed after pull
    assert any(cmd==['pull','m.daocloud.io/docker.io/'+vllm['reference'].removeprefix('docker.io/')] for cmd in commands())
    started=task('start','deployments','d');assert started['config']['image']=='sha256:'+'b'*64

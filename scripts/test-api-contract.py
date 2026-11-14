@@ -29,7 +29,9 @@ url=urls[0];data=b'fixture-gguf'
 if '/api/models/' in url:
  revision=url.split('/revision/')[1].split('?')[0];revision=revision if len(revision)==40 else '1'*40;digest='0'*64 if pathlib.Path(os.environ['PHYXI_BAD_DOWNLOAD']).exists() else hashlib.sha256(data).hexdigest()
  print(json.dumps({'sha':revision,'siblings':[{'rfilename':'tiny.gguf','lfs':{'sha256':digest}}]}))
-else:pathlib.Path(args[args.index('--output')+1]).write_bytes(data)
+else:
+ pathlib.Path(args[args.index('--output')+1]).write_bytes(data)
+ print('#### 100.0%',file=sys.stderr)
 '''
 def port():
  with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
@@ -55,7 +57,9 @@ def main():
     try:token=(d/'state/token').read_text();call('/config');break
     except OSError:time.sleep(.05)
    download=call('/config');download.update(engine='llama_cpu',source={'repo':'test/tiny','revision':'a'*40,'file':'tiny.gguf'},model_path=str(d/'dummy.gguf'),max_num_seqs=1,max_model_len=512,port=port());call('/config','PUT',download)
-   assert task('download')['status']=='succeeded'
+   downloaded=task('download');assert downloaded['status']=='succeeded'
+   assert downloaded['progress']['kind']=='weights' and downloaded['progress']['percent']==100.0
+   assert downloaded['progress']['file_index']==downloaded['progress']['file_total']==1
    cached=pathlib.Path(call('/config')['model_path']);assert cached.read_bytes()==b'fixture-gguf';assert cached.parent.joinpath('phyxi-manifest.json').exists()
    (d/'bad-download').touch();download['source']['revision']='b'*40;call('/config','PUT',download);assert task('download')['status']=='failed';assert not pathlib.Path(call('/config')['model_path']).exists()
    c=call('/config');c.update(engine='llama_cpu',source=None,model_path=str(d/'dummy.gguf'),max_num_seqs=1,max_model_len=512,verify_tools=True,verify_images=True,port=port());call('/config','PUT',c)

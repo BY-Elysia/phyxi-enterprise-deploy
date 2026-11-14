@@ -9,6 +9,7 @@ use catalog_api::{
     workspace_export, Scope,
 };
 mod config;
+mod download_progress;
 mod environment;
 mod executor;
 mod gateway;
@@ -330,6 +331,11 @@ async fn jobs(State(a): State<App>) -> Result<Json<Value>> {
     for job in a.store.jobs()? {
         let mut row = serde_json::to_value(&job).map_err(|e| e.to_string())?;
         row["composition"] = a.store.setting(&format!("composition:{}", job.id))?;
+        let mut progress = a.store.setting(&format!("progress:{}", job.id))?;
+        if let Some(object) = progress.as_object_mut() {
+            object.remove("pending");
+        }
+        row["progress"] = progress;
         rows.push(row);
     }
     Ok(Json(json!(rows)))

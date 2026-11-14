@@ -22,7 +22,7 @@ elif cmd=='image':
 elif cmd=='pull':
  if p.with_suffix('.slow').exists():time.sleep(.6)
  p.with_suffix('.missing-image').unlink(missing_ok=True)
- print('fake image ready')
+ print('abcdef123456: Pulling fs layer');print('abcdef123456: Download complete');print('abcdef123456: Pull complete');print('fake image ready')
 elif cmd=='run':
  assert '--privileged' not in args
  assert args[args.index('--publish')+1].startswith('127.0.0.1:')

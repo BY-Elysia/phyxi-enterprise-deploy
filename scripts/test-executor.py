@@ -73,6 +73,8 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
             time.sleep(.1)
         else:raise AssertionError('executor did not recover')
         assert call('/api/config')[1]['image']==c['image']
+        restored=next(v for v in call('/api/jobs')[1] if v['id']==j['id'])
+        assert restored['progress']['layers']['abcdef123456']=='已就绪' and 'pending' not in restored['progress']
         assert call('/api/environment')[1]['executor'] is True
         assert call('/api/image-sources')[1]['config']==sources
         status,cancel_job=call('/api/actions/pull_image','POST');assert status==202

@@ -159,6 +159,25 @@ impl Store {
             params![id, message],
         )
         .map_err(|e| e.to_string())?;
+        let key = format!("progress:{id}");
+        let progress: Option<String> = c
+            .query_row("SELECT value FROM settings WHERE key=?1", [&key], |r| {
+                r.get(0)
+            })
+            .ok();
+        if let Some(raw) = progress {
+            let mut progress: crate::download_progress::Progress =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            progress.feed(&message);
+            c.execute(
+                "UPDATE settings SET value=?2 WHERE key=?1",
+                params![
+                    key,
+                    serde_json::to_string(&progress).map_err(|e| e.to_string())?
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         c.execute("DELETE FROM events WHERE job_id=?1 AND seq NOT IN (SELECT seq FROM events WHERE job_id=?1 ORDER BY seq DESC LIMIT 2000)",[id]).map_err(|e|e.to_string())?;
         Ok(())
     }

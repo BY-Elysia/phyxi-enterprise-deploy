@@ -275,6 +275,7 @@ pub async fn download(
             "running",
             &format!("权重文件 {}/{}：{name}", index + 1, files.len()),
         )?;
+        store.set_setting(&format!("progress:{id}"), &json!({"kind":"weights","source":base,"file":name,"file_index":index+1,"file_total":files.len(),"phase":"下载并校验当前文件"}))?;
         let expected = f["lfs"]["sha256"].as_str();
         if !target.exists() || expected.is_none() || hash(&target)?.as_str() != expected.unwrap() {
             let partial = target.with_extension("phyxi-part");
