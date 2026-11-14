@@ -3,8 +3,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
+COPY console/Cargo.toml ./console/Cargo.toml
+# Cache dependency compilation independently from application/frontend changes.
+RUN mkdir -p console/src && printf 'fn main() {}\n' > console/src/main.rs \
+    && cargo build --release --locked --workspace
 COPY console ./console
-RUN cargo build --release --locked --workspace
+RUN touch console/src/main.rs && cargo build --release --locked --workspace
 
 FROM docker:28-cli AS dockercli
 

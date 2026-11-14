@@ -1,7 +1,7 @@
 name: phyxi-managed
 services:
   console:
-    image: phyxi-console:local
+    image: ${PHYXI_CONTROL_IMAGE:-phyxi-console:local}
     build:
       context: ..
     restart: unless-stopped
@@ -11,7 +11,7 @@ services:
       PHYXI_PORT: "8765"
       PHYXI_REQUIRE_ADMIN: "1"
       PHYXI_MANAGED_SERVICES: "1"
-      PHYXI_CONTROL_IMAGE: phyxi-console:local
+      PHYXI_CONTROL_IMAGE: ${PHYXI_CONTROL_IMAGE:-phyxi-console:local}
       PHYXI_GATEWAY_CONTAINER: phyxi-managed-gateway
       PHYXI_ACCESS_URL: http://127.0.0.1:8766
       PHYXI_ACCESS_ADMIN_FILE: ${PHYXI_DATA_DIR}/service-secrets/access.token

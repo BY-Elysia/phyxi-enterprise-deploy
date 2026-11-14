@@ -1,0 +1,68 @@
+name: Console release package
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'console/**'
+      - 'Cargo.*'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'deployment/**'
+      - 'scripts/**'
+      - 'docs/prebuilt-release.md'
+      - '.github/workflows/console-release.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: console-release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  amd64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate source
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo test --workspace --locked
+          cargo build --workspace --locked
+          python3 scripts/smoke-console.py
+          python3 scripts/test-api-contract.py
+          python3 scripts/test-admin-security.py
+          python3 scripts/test-console-release.py
+      - uses: docker/setup-buildx-action@v3
+      - name: Build native AMD64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: phyxi-console:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=console-amd64
+          cache-to: type=gha,mode=max,scope=console-amd64
+      - name: Package and verify offline release
+        env:
+          RELEASE_IMAGE: phyxi-console:sha-${{ github.sha }}
+          REVISION: ${{ github.sha }}
+        run: |
+          python3 scripts/package-console.py --image "$RELEASE_IMAGE" --revision "$REVISION" --output dist
+          python3 scripts/console-image.py --bundle dist
+          # Exercise the release binary without publishing ports or starting other services.
+          printf 'release-test-password-not-for-deployment' | docker run --rm -i "$RELEASE_IMAGE" --set-admin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phyxi-console-linux-amd64-${{ github.sha }}
+          path: dist/
+          compression-level: 0
+          retention-days: 30
+          if-no-files-found: error

@@ -2,13 +2,15 @@
 
 ## 部署顺序
 
+默认使用[预构建发布包](prebuilt-release.md)，服务器不现场编译。
+
 首次安装只运行 PhyXi 控制台一个应用容器，不启动 Nginx、鉴权服务或模型，不要求准备域名与企业证书。后续企业网关、HTTPS 管理入口、证书和客户端工作区仍然保留，通过控制台显式设置和启用。
 
 Docker 是运行控制台容器的前提。GPU 驱动和 NVIDIA Container Toolkit 属于宿主机基础设施，不在容器内部安装替代品；首次安装前准备，页面会检测其状态。本次不新增任意宿主机命令执行接口。
 
 ```bash
 # 在项目根目录，先确认 Docker 已安装并运行
-python3 scripts/bootstrap-console.py --data-dir /srv/phyxi/data --build
+python3 scripts/bootstrap-console.py --data-dir /srv/phyxi/data --bundle /opt/phyxi-release
 # 脚本交互读取管理员密码，不写入命令参数或明文配置
 ```
 
@@ -43,7 +45,7 @@ ssh -N -L 8765:127.0.0.1:8765 root@SERVER
 ## 更新与验证
 
 ```bash
-PHYXI_DATA_DIR=/srv/phyxi/data docker compose -f deployment/compose.console-only.yaml up -d --build console
+docker compose --env-file /srv/phyxi/data/console.env -f deployment/compose.console-only.yaml up -d --no-build --pull never --wait console
 ```
 
 更新控制台不会停止模型或接入组件，不自动接管旧外部 Compose 的容器。升级前按备份文档备份状态。已有四容器安装继续使用原部署方式，不能直接混用迁移。
