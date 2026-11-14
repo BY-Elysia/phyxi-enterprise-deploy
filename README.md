@@ -1,3 +1,5 @@
+> 镜像下载：[默认来源、企业仓库覆盖与服务器实测](docs/image-download-sources.md)。Nginx / vLLM / SGLang 默认使用显式镜像代理，预设固定官方摘要。
+
 > 当前服务器部署采用 [控制台与宿主机执行器分离](docs/executor-architecture.md)：同一台服务器、受限控制台容器 + systemd 执行器，其他服务从页面按需部署。旧的直连 Docker 安装方式仅供迁移参考。
 
 > 企业版架构及分阶段验收：[完整架构与开发方案](docs/enterprise-plan.md)。P0–P4 已完成本地实现；GPU 推理仍待服务器验收。

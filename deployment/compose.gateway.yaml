@@ -7,7 +7,7 @@ services:
       gateway:
         condition: service_started
   gateway:
-    image: nginx:1.28-bookworm
+    image: ${PHYXI_NGINX_IMAGE:-m.daocloud.io/docker.io/library/nginx@sha256:552e7481ca93ffccd046aa658dbbed22caefbc09c66fa7cd247cbb90b8a5c609}
     container_name: phyxi-gateway-1
     restart: unless-stopped
     network_mode: host

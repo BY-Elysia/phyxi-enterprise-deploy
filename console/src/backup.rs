@@ -43,6 +43,7 @@ fn permitted(name: &str) -> bool {
         "manifest.json",
         "state.db",
         "admin.hash",
+        "image-sources.json",
         "owner",
         "token",
         "access/access.db",
@@ -134,6 +135,7 @@ pub fn create(root: &Path, out: &Path, password: &str) -> Result<(), String> {
     let mut paths = vec![
         "state.db".to_string(),
         "admin.hash".into(),
+        "image-sources.json".into(),
         "owner".into(),
         "token".into(),
         "access/access.db".into(),

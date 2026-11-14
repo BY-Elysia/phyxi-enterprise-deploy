@@ -121,6 +121,7 @@ impl Runtime {
     }
     pub async fn local_image(&self, reference: &str) -> Result<Value, String> {
         crate::catalog::image_valid(reference)?;
+        let resolved = crate::image_sources::load(&self.data)?.resolve(reference)?;
         let raw = self
             .call(
                 vec![
@@ -128,14 +129,14 @@ impl Runtime {
                     "inspect".into(),
                     "--format".into(),
                     "{{json .}}".into(),
-                    reference.into(),
+                    resolved,
                 ],
                 None,
                 15,
             )
             .await
             .map_err(|e| {
-                format!("推理引擎镜像尚未准备好，请先在推理引擎镜像页面下载或手动 docker pull。{e}")
+                format!("推理引擎镜像尚未准备好，请先在推理引擎镜像页面下载；若已切换来源，需重新检查该来源的本地镜像。{e}")
             })?;
         let v: Value = serde_json::from_str(&raw).map_err(|e| format!("无法读取本地镜像：{e}"))?;
         crate::catalog::immutable_image_valid(v["Id"].as_str().ok_or("本地镜像缺少 ID")?)?;

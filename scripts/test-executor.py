@@ -41,6 +41,10 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
         for _ in range(50):
             if sock.exists():break
             time.sleep(.1)
+        assert call('/api/image-sources',authenticated=False)[0]==401
+        sources={'mode':'enterprise','mirror_prefix':'registry.company.example/dockerhub','gateway_image':'nginx:1.28-bookworm'}
+        assert call('/api/image-sources','PUT',sources)[0]==200
+        assert (host/'image-sources.json').exists() and not (web/'image-sources.json').exists()
         assert call('/api/config',authenticated=False)[0]==401
         assert call('/api/actions/verify_gpu','POST',authenticated=False)[0]==401
         status,c=call('/api/config');assert status==200,(status,c)
@@ -49,6 +53,7 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
         assert call('/api/actions/arbitrary-shell','POST')[0]==404
         (d/'fake.slow').touch()
         status,j=call('/api/actions/pull_image','POST');assert status==202,(status,j)
+        assert call('/api/image-sources','PUT',sources)[0]==409
         console.terminate();console.wait(timeout=10);console=start_console();login()
         for _ in range(80):
             status,jobs=call('/api/jobs');assert status==200,(status,jobs)
@@ -69,6 +74,15 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
         else:raise AssertionError('executor did not recover')
         assert call('/api/config')[1]['image']==c['image']
         assert call('/api/environment')[1]['executor'] is True
+        assert call('/api/image-sources')[1]['config']==sources
+        status,cancel_job=call('/api/actions/pull_image','POST');assert status==202
+        assert call('/api/actions/cancel','POST')[0]==202
+        for _ in range(30):
+            task=next(v for v in call('/api/jobs')[1] if v['id']==cancel_job['id'])
+            if task['status']=='cancelled':break
+            time.sleep(.1)
+        else:raise AssertionError(task)
+
         # No HTTP authentication/static routes on the private socket, even with the service token.
         for path,expected in [('/api/config',401),('/api/auth/login',404),('/containers/json',404)]:
             s=socket.socket(socket.AF_UNIX);s.connect(str(sock));s.sendall(f'GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'.encode());answer=s.recv(4096);s.close();assert f' {expected} '.encode() in answer,answer

@@ -15,7 +15,7 @@ def main():
   if not args.model:model.write_bytes(b'test')
   llama=args.llama or d/'llama-server'
   if not args.llama:llama.write_text(contract.FAKE);llama.chmod(0o755)
-  docker=d/'docker';docker.write_text('#!/bin/sh\nexit 0\n');docker.chmod(0o755)
+  docker=d/'docker';docker.write_text("#!/usr/bin/env python3\nimport json,sys\nif 'image' in sys.argv and 'inspect' in sys.argv:print(json.dumps({'Id':'sha256:'+'b'*64,'Architecture':'amd64','Size':1234}))\n");docker.chmod(0o755)
   http=port();env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(http),PHYXI_ENABLE_HOST_SETUP='0',PHYXI_LLAMA_SERVER=str(llama.resolve()),PHYXI_BAD_RESPONSE=str(d/'bad'),PATH=str(d)+os.pathsep+env['PATH'])
   if args.nginx:env['PHYXI_NGINX']=str(args.nginx.resolve())
   log=(d/'console.log').open('w');proc=subprocess.Popen([str(ROOT/'target/debug/phyxi-console')],env=env,stdout=log,stderr=log);token=''

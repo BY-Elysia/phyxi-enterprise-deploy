@@ -15,6 +15,7 @@ mod gateway;
 mod gateway_container;
 mod host_metrics;
 mod host_setup;
+mod image_sources;
 mod presets;
 mod process;
 mod runtime;
@@ -118,6 +119,28 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route(
+            "/image-sources",
+            get(|State(a): State<App>| async move {
+                image_sources::info(&a.runtime.data)
+                    .map(Json)
+                    .map_err(Error::from)
+            })
+            .put(
+                |State(a): State<App>, Json(value): Json<image_sources::Sources>| async move {
+                    let _permit = a.gate.clone().try_acquire_owned().map_err(|_| {
+                        Error(
+                            StatusCode::CONFLICT,
+                            "任务执行中，请稍后修改镜像来源".into(),
+                        )
+                    })?;
+                    image_sources::save(&a.runtime.data, &value)?;
+                    image_sources::info(&a.runtime.data)
+                        .map(Json)
+                        .map_err(Error::from)
+                },
+            ),
+        )
         .route(
             "/deployments/{id}/comparison",
             get(catalog_api::deployment_comparison),

@@ -87,10 +87,7 @@ pub async fn run(
             crate::artifacts::download(&runtime.data, c, id, store, cancel).await
         }
         "pull_image" => {
-            crate::catalog::image_valid(&c.image)?;
-            let mut cmd = Command::new("docker");
-            cmd.args(["--host", &runtime.docker_host, "pull", &c.image]);
-            execute(cmd, Some((store, id.into())), 1800).await?;
+            crate::image_sources::pull(runtime, &c.image, id, store, cancel.clone()).await?;
             if cancel.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err("任务已取消".into());
             }

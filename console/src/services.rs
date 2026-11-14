@@ -91,7 +91,9 @@ pub async fn status(r: &Runtime) -> Result<Value, String> {
         };
         rows.push(json!({"name":label,"container":name,"state":v.as_ref().map(|v|v["State"]["Status"].clone()).unwrap_or(json!("absent"))}));
     }
-    Ok(json!({"managed":true,"components":rows,"gateway_image":"nginx:1.28-bookworm"}))
+    Ok(
+        json!({"managed":true,"components":rows,"gateway_image":crate::image_sources::load(&r.data)?.gateway_image}),
+    )
 }
 pub async fn absent(g: &Gateway) -> Result<bool, String> {
     let data = g.dir.parent().ok_or("状态目录无效")?.to_path_buf();
@@ -134,26 +136,20 @@ pub async fn run(
     crate::catalog::image_valid(&image)?;
     // Same installed console image, never download an unrelated authentication implementation.
     docker(r, &["image".into(), "inspect".into(), image.clone()]).await?;
-    if gateway.is_none()
-        && docker(
-            r,
-            &[
-                "image".into(),
-                "inspect".into(),
-                "nginx:1.28-bookworm".into(),
-            ],
-        )
-        .await
-        .is_err()
-    {
+    let gateway_reference = crate::image_sources::load(&r.data)?.gateway_image;
+    if gateway.is_none() && r.local_image(&gateway_reference).await.is_err() {
         store.update(id, "running", "下载 Nginx 镜像")?;
-        execute(
-            command(r, &["pull".into(), "nginx:1.28-bookworm".into()]),
-            Some((store.clone(), id.into())),
-            1800,
-        )
-        .await?;
+        crate::image_sources::pull(r, &gateway_reference, id, store.clone(), cancel.clone())
+            .await?;
     }
+    let gateway_image = if gateway.is_none() {
+        r.local_image(&gateway_reference).await?["Id"]
+            .as_str()
+            .ok_or("Nginx 镜像缺少 ID")?
+            .to_owned()
+    } else {
+        String::new()
+    };
     if cancel.load(Ordering::SeqCst) {
         return Err("任务已取消".into());
     }
@@ -226,7 +222,7 @@ pub async fn run(
             args.extend([
                 "--entrypoint".into(),
                 "nginx".into(),
-                "nginx:1.28-bookworm".into(),
+                gateway_image.clone(),
                 "-p".into(),
                 g.dir.display().to_string(),
                 "-c".into(),

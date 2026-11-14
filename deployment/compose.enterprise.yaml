@@ -53,7 +53,7 @@ services:
       retries: 5
     logging: *logs
   gateway:
-    image: nginx:1.28-bookworm
+    image: ${PHYXI_NGINX_IMAGE:-m.daocloud.io/docker.io/library/nginx@sha256:552e7481ca93ffccd046aa658dbbed22caefbc09c66fa7cd247cbb90b8a5c609}
     container_name: phyxi-enterprise-gateway
     restart: unless-stopped
     labels:

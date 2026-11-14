@@ -108,11 +108,14 @@ pub(crate) async fn image_status(
     let cat = catalog::Catalog::load(&a.store)?;
     let i: catalog::Image = cat.data("images", &id)?;
     catalog::image_valid(&i.reference)?;
+    let effective = crate::image_sources::load(&a.runtime.data)?.resolve(&i.reference)?;
     match a.runtime.local_image(&i.reference).await {
         Ok(v) => Ok(Json(
-            json!({"available":true,"id":v["Id"],"architecture":v["Architecture"],"size_bytes":v["Size"],"reference":i.reference}),
+            json!({"available":true,"id":v["Id"],"architecture":v["Architecture"],"size_bytes":v["Size"],"reference":i.reference,"effective_reference":effective}),
         )),
-        Err(e) => Ok(Json(json!({"available":false,"detail":e}))),
+        Err(e) => Ok(Json(
+            json!({"available":false,"detail":e,"effective_reference":effective}),
+        )),
     }
 }
 pub(crate) async fn resolve_action(

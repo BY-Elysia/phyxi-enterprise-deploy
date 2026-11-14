@@ -8,6 +8,7 @@ with tempfile.TemporaryDirectory() as td:
     (state/'owner').write_text('persistent-owner');(state/'admin.hash').write_text('test-hash');(state/'models').mkdir();(state/'models/weights').write_bytes(b'excluded model weights')
     (state/'access').mkdir();db=sqlite3.connect(state/'access/access.db');db.execute('create table credentials(hash text)');db.execute("insert into credentials values('stored-key-hash')");db.commit();db.close()
     (state/'gateway').mkdir();(state/'gateway/nginx.conf').write_text('old model route');(state/'gateway/active-container.json').write_text('{}')
+    (state/'image-sources.json').write_text('{"mode":"direct"}')
     password='private-backup-passphrase';archive=base/'snapshot.phyxi'
     def call(op,path,pw=password):return subprocess.run([str(binary),'--'+op,str(path)],input=pw,text=True,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     for lockname in ['server.lock','access/access.lock']:
@@ -26,6 +27,7 @@ with tempfile.TemporaryDirectory() as td:
     r=call('restore',archive);assert r.returncode==0,r.stderr
     db=sqlite3.connect(state/'state.db');assert db.execute('select value from sample').fetchone()[0]=='original configuration';db.close()
     db=sqlite3.connect(state/'access/access.db');assert db.execute('select hash from credentials').fetchone()[0]=='stored-key-hash';db.close()
+    assert json.loads((state/'image-sources.json').read_text())=={'mode':'direct'}
     assert (state/'owner').read_text()=='persistent-owner'
     assert not (state/'gateway/active-container.json').exists()
     assert 'old model route' not in (state/'gateway/nginx.conf').read_text()

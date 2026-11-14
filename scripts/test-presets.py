@@ -31,6 +31,13 @@ def main():
    for _ in range(100):
     try:token=(d/'state/token').read_text();presets=call('/presets');break
     except OSError:time.sleep(.05)
+   sources=call('/image-sources');assert sources['config']['mode']=='default'
+   assert sources['effective_gateway_image'].startswith('m.daocloud.io/docker.io/library/nginx@sha256:')
+   enterprise={'mode':'enterprise','mirror_prefix':'registry.company.example/dockerhub','gateway_image':'nginx:1.28-bookworm'}
+   assert call('/image-sources','PUT',enterprise)['effective_gateway_image']=='registry.company.example/dockerhub/library/nginx:1.28-bookworm'
+   assert json.loads((d/'state/image-sources.json').read_text())==enterprise
+   call('/image-sources','PUT',{**enterprise,'mirror_prefix':'https://bad.example'},status=400)
+   call('/image-sources','PUT',sources['config'])
    assert {x['engine'] for x in presets['images']}=={'vllm','sglang'}
    assert any('GLM' in x['name'] for x in presets['models']) and any('Qwen' in x['name'] for x in presets['models'])
    remote={'model_name':'Qwen3-0.6B','model_path':'/unused','source':{'repo':'https://huggingface.co/Qwen/Qwen3-0.6B','revision':'main','file':''}}
@@ -46,6 +53,8 @@ def main():
    (d/'container.missing-image').touch();call('/actions/start?kind=deployments&id=d','POST',status=400)
    assert not any(cmd[0]=='pull' for cmd in commands())
    task('pull_image','images','v');assert call('/images/v/status')['available']
+   assert commands()[-1]  # inspect executed after pull
+   assert any(cmd==['pull','m.daocloud.io/docker.io/'+vllm['reference'].removeprefix('docker.io/')] for cmd in commands())
    started=task('start','deployments','d');assert started['config']['image']=='sha256:'+'b'*64
    task('stop','deployments','d')
    runtime['engine']='sglang';put('runtimes','r',runtime,1)
