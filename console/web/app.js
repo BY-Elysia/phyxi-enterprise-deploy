@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const titles={deployments:'部署实例',models:'模型权重',images:'运行环境',runtimes:'推理参数',gateways:'企业网关',workspaces:'工作区',environment:'服务器环境',tasks:'操作记录',reports:'验收与发布'};
 const descriptions={deployments:'把模型权重、推理镜像和运行参数组合成服务，选择 GPU 与端口，再启动或停止。',models:'选择 GLM、Qwen 等预设来源或自定义仓库，先下载权重，也可使用自行准备的本地文件。预设只填地址，不自动下载。',images:'选择 vLLM / SGLang 默认镜像或自定义地址。请先下载到部署服务器，启动时不会自动下载。',runtimes:'选择 vLLM / SGLang 并设置上下文、并发、显存比例；需与运行环境中的引擎一致。',gateways:'选择部署作为后端，独立配置企业域名、证书与访问规则。',workspaces:'选择企业网关，生成客户端接入配置。凭据通过环境变量引用。',environment:'当前服务器的依赖版本、显卡、内存与磁盘状态。',tasks:'每次操作的状态、日志与当时使用的配置快照。',reports:'查看真实接口验收结果与发布记录。'};
-const actionNames={start:'启动部署',stop:'停止实例',download:'下载权重',pull_image:'下载运行环境',certificate:'准备证书',gateway_start:'启动网关',gateway_stop:'停止网关',verify:'接口验收',publish:'验收并发布',prepare:'安装环境'};
+const actionNames={start:'启动部署',stop:'停止实例',download:'下载权重',pull_image:'下载推理引擎镜像',certificate:'准备证书',gateway_start:'启动网关',gateway_stop:'停止网关',verify:'接口验收',publish:'验收并发布',prepare:'安装环境'};
 const states={running:'执行中',succeeded:'成功',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
 let presets={images:[],models:[],endpoints:[]};
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},editing=null,connected=false,busy=false,jobs=[],activeJob='',runtime={};
@@ -15,7 +15,7 @@ const fields={
  gateways:[['deployment','后端部署对象','ref:deployments',''],['domain','企业域名','text','localhost'],['bind_ip','监听 IPv4','text','127.0.0.1'],['port','HTTPS 端口','number',18443],['allowed_cidrs','允许来源网段（逗号分隔）','text','127.0.0.1/32'],['tls_mode','证书模式','tls','self_signed'],['cert_file','证书链路径','optional',''],['key_file','私钥路径','optional',''],['ca_file','CA 文件路径','optional','']],
  workspaces:[['gateway','企业网关','ref:gateways',''],['credential_env','客户端凭据环境变量名','text','PHYXI_API_KEY']]
 };
-const hints={models:'保存时只查询版本信息，不下载权重。保存后点击下载权重；自定义支持 owner/model、Hugging Face 或 hf-mirror 仓库地址。GPU 引擎使用完整权重，CPU 测试使用 GGUF。',images:'选择预设只填写地址，不下载。保存后点击下载运行环境，或自行 docker pull；启动只使用已准备的本地镜像，并固定镜像 ID。',runtimes:'GPU 运行环境与参数需使用同一引擎。显存比例在 vLLM 对应 gpu-memory-utilization，在 SGLang 对应 mem-fraction-static；CPU 测试限制为上下文 128–2048、单并发。',deployments:'可以先保存未完成的组合。启动前必须补齐引用；全服务器只允许一个运行实例。TP 自动等于所选 GPU 数量。',gateways:'可先独立保存网关配置，启动时再选择已运行的部署。证书路径位于服务器；自签模式仅用于回环测试。',workspaces:'工作区是客户端连接模板，不创建远程工作站或容器。导出内容不包含服务密钥。'};
+const hints={models:'保存时只查询版本信息，不下载权重。保存后点击下载权重；自定义支持 owner/model、Hugging Face 或 hf-mirror 仓库地址。GPU 引擎使用完整权重，CPU 测试使用 GGUF。',images:'选择预设只填写地址，不下载。保存后点击下载推理引擎镜像，或自行 docker pull；启动只使用已准备的本地镜像，并固定镜像 ID。',runtimes:'GPU 运行环境与参数需使用同一引擎。显存比例在 vLLM 对应 gpu-memory-utilization，在 SGLang 对应 mem-fraction-static；CPU 测试限制为上下文 128–2048、单并发。',deployments:'可以先保存未完成的组合。启动前必须补齐引用；全服务器只允许一个运行实例。TP 自动等于所选 GPU 数量。',gateways:'可先独立保存网关配置，启动时再选择已运行的部署。证书路径位于服务器；自签模式仅用于回环测试。',workspaces:'工作区是客户端连接模板，不创建远程工作站或容器。导出内容不包含服务密钥。'};
 async function api(path,options={}){const r=await fetch('/api'+path,{...options,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'}});const d=await r.json();if(!r.ok)throw Error(d.error||JSON.stringify(d));return d;}
 function notice(t,error=false){$('notice').textContent=t;$('notice').className=error?'error':'';}
 function safe(fn){return async()=>{try{await fn();}catch(e){notice(e.message,true);}};}
@@ -104,6 +104,7 @@ function addPresetPicker(kind,isExisting){
 }
 async function assetStatus(kind,id){
  const result=await api(`/${kind}/${id}/status`);if(view!==kind||selection[view]!==id)return;
- const ready=kind==='images'?result.available:result.ready;const detail=kind==='images'?(ready?`架构 ${result.architecture||'未知'} · ${bytes(result.size_bytes)} · 部署时固定本地镜像 ID`:'尚未准备，请先下载运行环境；也可在本服务器手动 docker pull。'):result.detail;
+ const ready=kind==='images'?result.available:result.ready;const detail=kind==='images'?(ready?`架构 ${result.architecture||'未知'} · ${bytes(result.size_bytes)}`:'尚未准备，请先下载推理引擎镜像；也可在本服务器手动 docker pull。'):result.detail;
  $('asset-readiness').replaceChildren(metricCard(kind==='images'?'运行环境准备状态':'模型权重准备状态',ready?'已准备':'未准备',detail));
+ if(kind==='images'&&ready){const d=document.createElement('details');const title=document.createElement('summary');title.textContent='镜像详情';const p=document.createElement('p');p.className='hint';p.textContent='本地镜像 ID：'+(result.id||'未知')+'。由部署服务器 Docker 自动读取，无需填写；部署时固定此版本。';d.append(title,p);$('asset-readiness').append(d);}
 }
