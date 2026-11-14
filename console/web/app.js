@@ -188,7 +188,7 @@ function taskProgressCard(job){
  const draft=catalog[job.composition?.kind]?.[job.composition?.id];if(draft&&job.composition?.revision&&draft.revision!==job.composition.revision){const version=document.createElement('p');version.className='hint';version.textContent=`任务使用配置 r${job.composition.revision} · 当前草稿 r${draft.revision}`;card.append(version);}
  const p=job.progress;const running=['running','pending'].includes(job.status);
  if(p){
-  const phase=document.createElement('p');phase.className='hint';phase.textContent=p.kind==='weights'?`文件 ${p.file_index} / ${p.file_total} · ${p.file}`:running?(p.phase||'等待下载信息'):job.status==='succeeded'?'镜像准备完成':'最后下载阶段：'+(p.phase||'等待下载信息');card.append(phase);
+  const phase=document.createElement('p');phase.className='hint';phase.textContent=p.kind==='weights'?(p.file_total?`文件 ${p.file_index} / ${p.file_total} · ${p.file}`:(p.phase||'正在获取模型文件清单')):running?(p.phase||'等待下载信息'):job.status==='succeeded'?'镜像准备完成':'最后下载阶段：'+(p.phase||'等待下载信息');card.append(phase);
   if(p.kind==='weights'){
    const known=Number.isFinite(p.bytes_total)&&p.bytes_total>0&&Number.isFinite(p.bytes_ready);
    const value=document.createElement('strong');value.className='download-number';value.textContent=known?`${Math.min(100,p.bytes_ready/p.bytes_total*100).toFixed(1)}%`:Number.isFinite(p.percent)?`当前文件 ${p.percent.toFixed(1)}%`:'正在获取文件进度';card.append(value);
