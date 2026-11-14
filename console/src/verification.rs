@@ -31,19 +31,59 @@ pub async fn request(
         "--write-out",
         "\n%{http_code}",
     ]);
+    let mut temporary_credential = false;
     let url = if let Some((gw, gc)) = g {
         cmd.arg("--cacert")
             .arg(gw.dir.join("ca.pem"))
-            .arg("--resolve")
-            .arg(format!("{}:{}:127.0.0.1", gc.domain, gc.port));
+            .arg("--connect-to")
+            .arg(format!(
+                "{}:{}:{}:{}",
+                gc.domain,
+                gc.port,
+                std::env::var("PHYXI_GATEWAY_HOST").unwrap_or("127.0.0.1".into()),
+                gc.port
+            ));
         if authorized {
-            fs::write(&auth, format!("Authorization: Bearer {}", gw.token()?))
+            let token = if crate::access::configured() {
+                let (status, _) = crate::access::call(
+                    data,
+                    "system-verification",
+                    Some(json!({"operation":"apply","gateway":gc.workspace_scope})),
+                )
+                .await?;
+                if status != 200 {
+                    return Err("无法创建临时验收凭据".into());
+                }
+                let (status, key) = crate::access::call(
+                    data,
+                    "system-verification",
+                    Some(json!({"operation":"rotate"})),
+                )
+                .await?;
+                if status != 200 {
+                    return Err("无法生成临时验收凭据".into());
+                }
+                temporary_credential = true;
+                key["key"]
+                    .as_str()
+                    .ok_or("临时验收凭据响应无效")?
+                    .to_string()
+            } else {
+                gw.token()?
+            };
+            fs::write(&auth, format!("Authorization: Bearer {}", token))
                 .map_err(|e| e.to_string())?;
             cmd.arg("--header").arg(format!("@{}", auth.display()));
         }
         format!("https://{}:{}{path}", gc.domain, gc.port)
     } else {
-        format!("http://127.0.0.1:{}{path}", c.port)
+        if std::env::var("PHYXI_MODEL_NETWORK").is_ok()
+            && c.engine != crate::config::Engine::LlamaCpu
+        {
+            format!("http://phyxi-console-model:8000{path}")
+        } else {
+            format!("http://127.0.0.1:{}{path}", c.port)
+        }
     };
     if let Some(body) = body {
         fs::write(&payload, body.to_string()).map_err(|e| e.to_string())?;
@@ -58,6 +98,17 @@ pub async fn request(
     let result = execute(cmd, None, 50).await;
     let _ = fs::remove_file(&payload);
     let _ = fs::remove_file(&auth);
+    if temporary_credential {
+        let (status, _) = crate::access::call(
+            data,
+            "system-verification",
+            Some(json!({"operation":"revoke"})),
+        )
+        .await?;
+        if status != 200 {
+            return Err("临时验收凭据撤销未确认，禁止发布".into());
+        }
+    }
     let out = result?;
     let (body, status) = out.rsplit_once('\n').ok_or("HTTP 响应缺少状态码")?;
     Ok((

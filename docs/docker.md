@@ -58,3 +58,17 @@ docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
 存在 admin.hash 时前端自动切换为管理员密码登录，旧 Bearer Token 被拒绝。正式会话 Cookie 强制 Secure、HttpOnly、SameSite=Strict，有效期 8 小时；写操作需要 CSRF token。开发回环 HTTP 调试可显式设置 `PHYXI_LOCAL_HTTP_LOGIN=1`，仅限本地环境，不能作为企业 HTTPS 的替代。登录限速为全管理员入口每分钟 5 次、最多 32 个有效会话；无多账号或 SSO。
 
 网关对象增加“上传企业证书”：三个 PEM 文件各最多 64 KiB，校验通过后保存为草稿，私钥仅保存在权限受限目录。应用证书仍走显式准备/启动流程，不自动改变运行网关。管理员审计在“操作记录”展开查看，最多保存 5000 条、返回最新 200 条，仅记录账号/动作/状态/时间，来源地址将在可信网关接入阶段补齐。
+
+## P1b/P3：企业四容器模式
+
+独立部署文件为 `deployment/compose.enterprise.yaml`，不能与旧 host 网络覆盖文件混用。实际运行三个固定服务；部署模型时由控制台创建第四个模型容器。模型不发布宿主机端口。管理入口为 HTTPS 8443，业务入口为 HTTPS 18443；后端其他端口不发布。
+
+在新的状态目录执行 `scripts/prepare-enterprise.py --data-dir /absolute/state --binary /absolute/phyxi-console --domain console.company.example --cert /path/chain.pem --key /path/key.pem --ca /path/ca.pem`，交互设置密码，脚本验证证书并创建权限受限的服务间密钥、网关启动配置和 enterprise.env。随后执行脚本打印的 Compose 命令。已有状态目录拒绝覆盖，需先备份并迁移；不要直接覆盖现有部署。生产服务器须允许内网访问发布端口，并提前准备 Docker/驱动/Toolkit；GPU utility 注入仍需目标机验证。
+
+仅本地联调使用 `--local-test` 生成 7 天 localhost 测试证书，默认仅发布到 127.0.0.1。客户端应信任导出的 admin-ca.pem，不关闭 TLS 校验。不要修改本地测试模式的发布地址来冒充正式企业入口。Mac/Colima 与宿主机需保持时间同步。企业容器模式暂不支持原生 CPU 后端；CPU 小模型验证使用旧原生测试路径。
+
+工作区先“应用接入配置”，再生成 API Key；密钥只展示一次，关闭后只能重置。更换网关会撤销旧密钥，停用也会撤销；启用不会复活旧密钥。服务端只存摘要，鉴权服务串行写入并持久化后确认成功，独占锁防止同一数据库双实例写入。鉴权成功不缓存，Nginx 子请求不带正文，故障在短超时后拒绝新请求。临时验收凭据使用 system- 保留命名空间、短期有效并在请求结束后撤销。
+
+网关请求日志为结构化元数据，写入 Docker 日志（10 MiB × 3 上限），管理页按工作区过滤最近 200 行；不提供长期日志平台。管理审计从可信网关覆盖的来源头读取规范 IP，不信任请求体中的来源信息。控制台、鉴权服务互不共写数据库。独立网关不挂载 Docker socket，模型和鉴权也不挂载。
+
+联调脚本：`python3 scripts/test-access-service.py` 与 `python3 scripts/test-enterprise-containers.py`。后者使用真实四个容器，但模型端是 Python 协议 fixture；它只证明接入、撤销、流式连接、故障和重启边界，不代表 vLLM/SGLang GPU 推理成功。运行时禁止已有同名企业部署或模型容器；结束只清理该脚本创建的部署。

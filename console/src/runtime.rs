@@ -267,6 +267,14 @@ impl Runtime {
             "--gpu-memory-utilization".into(),
             c.gpu_memory_utilization.to_string(),
         ];
+        if let Ok(network) = std::env::var("PHYXI_MODEL_NETWORK") {
+            let p = args.iter().position(|s| s == "--publish").unwrap();
+            args[p] = "--network".into();
+            args[p + 1] = network;
+        }
+        if c.engine == Engine::Vllm {
+            args.push("--disable-log-requests".into());
+        }
         if c.engine == Engine::Sglang {
             let entry = args.iter().position(|a| a == "--entrypoint").unwrap();
             args.truncate(entry);

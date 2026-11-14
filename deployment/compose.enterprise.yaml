@@ -1,0 +1,81 @@
+name: phyxi-enterprise
+services:
+  console:
+    image: phyxi-console:local
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      PHYXI_STATE_DIR: ${PHYXI_DATA_DIR:?Absolute state directory required}
+      PHYXI_BIND: 0.0.0.0
+      PHYXI_PORT: "8765"
+      PHYXI_ENABLE_HOST_SETUP: "0"
+      PHYXI_TRUST_GATEWAY: "1"
+      PHYXI_DOCKER_HOST: unix:///var/run/docker.sock
+      PHYXI_GATEWAY_CONTAINER: phyxi-enterprise-gateway
+      PHYXI_GATEWAY_HOST: gateway
+      PHYXI_GATEWAY_BRIDGE: "1"
+      PHYXI_MODEL_NETWORK: phyxi-model
+      PHYXI_ACCESS_URL: http://access:8766
+      PHYXI_ACCESS_ADMIN_FILE: /run/phyxi/access.token
+    volumes:
+      - ${PHYXI_DATA_DIR}:${PHYXI_DATA_DIR}
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PHYXI_DATA_DIR}/service-secrets/access.token:/run/phyxi/access.token:ro
+    networks: [management, credentials, model]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8765/]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      access:
+        condition: service_healthy
+    logging: &logs
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  access:
+    image: phyxi-console:local
+    command: [--access]
+    restart: unless-stopped
+    environment:
+      PHYXI_ACCESS_DATA: /data
+      PHYXI_ACCESS_ADMIN_FILE: /run/phyxi/access.token
+      PHYXI_ACCESS_BIND: 0.0.0.0:8766
+    volumes:
+      - ${PHYXI_DATA_DIR}/access:/data
+      - ${PHYXI_DATA_DIR}/service-secrets/access.token:/run/phyxi/access.token:ro
+    networks: [authorization, credentials]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8766/health]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *logs
+  gateway:
+    image: nginx:1.28-bookworm
+    container_name: phyxi-enterprise-gateway
+    restart: unless-stopped
+    labels:
+      io.phyxi.role: gateway
+    entrypoint: [nginx]
+    command: [-p, "${PHYXI_DATA_DIR}/gateway", -c, "${PHYXI_DATA_DIR}/gateway/nginx.conf", -g, "daemon off;"]
+    ports:
+      - "${PHYXI_LISTEN_IP:-127.0.0.1}:8443:8443"
+      - "${PHYXI_LISTEN_IP:-127.0.0.1}:18443:18443"
+    volumes:
+      - ${PHYXI_DATA_DIR}/gateway:${PHYXI_DATA_DIR}/gateway
+    networks: [management, authorization, model]
+    depends_on:
+      console:
+        condition: service_healthy
+    logging: *logs
+networks:
+  management: {}
+  credentials:
+    internal: true
+  authorization:
+    internal: true
+  model:
+    name: phyxi-model
+    internal: true

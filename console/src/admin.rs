@@ -65,6 +65,13 @@ fn sid(h: &HeaderMap) -> Option<&str> {
         .split(';')
         .find_map(|s| s.trim().strip_prefix(&format!("{}=", cookie_name())))
 }
+fn source(h: &HeaderMap) -> Option<&str> {
+    if std::env::var("PHYXI_TRUST_GATEWAY").as_deref() == Ok("1") {
+        h.get("x-phyxi-client-ip").and_then(|v| v.to_str().ok())
+    } else {
+        None
+    }
+}
 fn error(code: StatusCode, message: &str) -> Response {
     (code, Json(json!({"error":message}))).into_response()
 }
@@ -196,7 +203,9 @@ pub async fn login(
     .await
     .unwrap_or(false);
     if !valid {
-        let _ = app.store.audit("admin", "login", 401);
+        let _ = app
+            .store
+            .audit_source("admin", "login", 401, source(&headers));
         return error(StatusCode::UNAUTHORIZED, "密码错误");
     }
     let id = random();
@@ -216,7 +225,9 @@ pub async fn login(
             expires: now() + 8 * 3600,
         },
     );
-    let _ = app.store.audit("admin", "login", 200);
+    let _ = app
+        .store
+        .audit_source("admin", "login", 200, source(&headers));
     let mut response = Json(json!({"authenticated":true,"csrf":csrf})).into_response();
     let secure = if insecure_local() { "" } else { "; Secure" };
     response.headers_mut().insert(
@@ -240,7 +251,9 @@ pub async fn logout(State(app): State<App>, headers: HeaderMap) -> Response {
     if let Some(id) = sid(&headers) {
         admin.memory.lock().unwrap().sessions.remove(id);
     }
-    let _ = app.store.audit("admin", "logout", 200);
+    let _ = app
+        .store
+        .audit_source("admin", "logout", 200, source(&headers));
     let mut response = Json(json!({"logged_out":true})).into_response();
     let secure = if insecure_local() { "" } else { "; Secure" };
     response.headers_mut().insert(

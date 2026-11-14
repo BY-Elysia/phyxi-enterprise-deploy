@@ -1,3 +1,4 @@
+mod access;
 mod admin;
 mod artifacts;
 mod catalog;
@@ -87,10 +88,24 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
         )
             .into_response();
     }
+    let source = if std::env::var("PHYXI_TRUST_GATEWAY").as_deref() == Ok("1") {
+        request
+            .headers()
+            .get("x-phyxi-client-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from)
+    } else {
+        None
+    };
     let action = format!("{} {}", request.method(), request.uri().path());
     let mut response = next.run(request).await;
     if write {
-        let _ = a.store.audit("admin", &action, response.status().as_u16());
+        let _ = a.store.audit_source(
+            "admin",
+            &action,
+            response.status().as_u16(),
+            source.as_deref(),
+        );
     }
     response
         .headers_mut()
@@ -99,6 +114,14 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route(
+            "/workspaces/{id}/requests",
+            get(catalog_api::workspace_requests),
+        )
+        .route(
+            "/workspaces/{id}/credential",
+            get(catalog_api::credential_status).post(catalog_api::credential_change),
+        )
         .route(
             "/gateways/{id}/certificate",
             post(catalog_api::certificate_upload)
@@ -365,6 +388,9 @@ pub(crate) fn private_file(path: &std::path::Path) -> std::io::Result<String> {
 }
 #[tokio::main(worker_threads = 2)]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--access") {
+        return access::serve().await.map_err(Into::into);
+    }
     if std::env::args().nth(1).as_deref() == Some("--prepare-host") {
         return environment::prepare_host().await.map_err(Into::into);
     }
@@ -409,7 +435,15 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     };
     catalog::migrate(&app.store)?;
     telemetry::start(app.store.clone(), app.runtime.clone());
-    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await?;
+    let bind: std::net::Ipv4Addr = std::env::var("PHYXI_BIND")
+        .unwrap_or("127.0.0.1".into())
+        .parse()?;
+    if !bind.is_loopback()
+        && (app.admin.is_none() || std::env::var("PHYXI_LOCAL_HTTP_LOGIN").as_deref() == Ok("1"))
+    {
+        return Err("非回环控制台必须启用管理员密码及 Secure 会话，并通过 HTTPS 网关接入".into());
+    }
+    let listener = tokio::net::TcpListener::bind((bind, port)).await?;
     println!(
         "PhyXi console: http://127.0.0.1:{}\n访问令牌文件: {}",
         listener.local_addr()?.port(),

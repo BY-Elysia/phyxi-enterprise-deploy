@@ -88,7 +88,17 @@ pub fn bootstrap(dir: &Path) -> Result<String, String> {
     if path.contains(['\n', '\r', '$', '"', '\\']) {
         return Err("网关路径包含不支持的字符".into());
     }
-    Ok(format!("worker_processes 1;\npid \"{path}/nginx.pid\";\nerror_log stderr warn;\nevents {{ worker_connections 128; }}\nhttp {{ access_log off; server {{ listen 127.0.0.1:18765; location = /health {{ return 200 'ready'; }} location / {{ return 404; }} }} }}\n"))
+    let address = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
+    let include = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+        format!("include \"{path}/management.conf\";")
+    } else {
+        String::new()
+    };
+    Ok(format!("worker_processes 1;\npid \"{path}/nginx.pid\";\nerror_log stderr warn;\nevents {{ worker_connections 128; }}\nhttp {{ {include} access_log off; server {{ listen {address}:18765; location = /health {{ return 200 'ready'; }} location / {{ return 404; }} }} }}\n"))
 }
 
 fn atomic(path: &Path, text: &[u8]) -> Result<(), String> {
@@ -163,21 +173,27 @@ pub async fn matches(g: &Gateway, c: &GatewayConfig, m: &Config) -> Result<(), S
 
 async fn observed() -> Result<String, String> {
     let mut cmd = Command::new("curl");
-    cmd.args([
-        "--noproxy",
-        "*",
-        "--fail",
-        "--silent",
-        "--max-time",
-        "2",
-        "http://127.0.0.1:18765/health",
-    ]);
+    cmd.args(["--noproxy", "*", "--fail", "--silent", "--max-time", "2"]);
+    cmd.arg(format!(
+        "http://{}:18765/health",
+        std::env::var("PHYXI_GATEWAY_HOST").unwrap_or("127.0.0.1".into())
+    ));
     execute(cmd, None, 3).await
 }
 
 pub async fn start(g: &Gateway, c: &GatewayConfig, m: &Config, text: &str) -> Result<(), String> {
     let generation = format!("{:x}", Sha256::digest(text.as_bytes()));
-    let health=format!("http {{\n server {{ listen 127.0.0.1:18765; location = /health {{ return 200 '{generation}'; }} location / {{ return 404; }} }}");
+    let address = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+        "0.0.0.0"
+    } else {
+        "127.0.0.1"
+    };
+    let include = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+        format!("include \"{}/management.conf\";", g.dir.display())
+    } else {
+        String::new()
+    };
+    let health=format!("http {{ {include}\n server {{ listen {address}:18765; location = /health {{ return 200 '{generation}'; }} location / {{ return 404; }} }}");
     let candidate = text.replacen("http {", &health, 1);
     let old = fs::read_to_string(g.dir.join("nginx.conf")).map_err(|e| e.to_string())?;
     apply(g, &candidate).await?;
@@ -280,4 +296,11 @@ mod docker_tests {
         recovered.stop().await.unwrap();
         assert!(!recovered.running().await.unwrap());
     }
+}
+
+pub async fn requests(g: &Gateway, workspace: &str) -> Result<serde_json::Value, String> {
+    let name = check(g).await?;
+    let text = docker(&["logs".into(), "--tail".into(), "200".into(), name]).await?;
+    let rows=text.lines().filter_map(|line|serde_json::from_str::<serde_json::Value>(line).ok()).filter(|v|v["type"]=="request"&&v["workspace_id"]==workspace).map(|v|serde_json::json!({"workspace_id":v["workspace_id"],"request_id":v["request_id"],"time":v["time"],"route":v["route"],"status":v["status"],"duration":v["duration"]})).collect::<Vec<_>>();
+    Ok(serde_json::Value::Array(rows))
 }

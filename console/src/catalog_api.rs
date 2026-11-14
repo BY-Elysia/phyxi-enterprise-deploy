@@ -22,6 +22,9 @@ pub(crate) async fn catalog_put(
         .clone()
         .try_acquire_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后修改配置".into()))?;
+    if kind == "workspaces" && id.starts_with("system-") {
+        return Err("system- 前缀用于系统内部工作区".to_string().into());
+    }
     if kind == "models" {
         let mut model: catalog::Model =
             serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
@@ -48,6 +51,11 @@ pub(crate) async fn catalog_delete(
         .clone()
         .try_acquire_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后删除配置".into()))?;
+    if kind == "workspaces" && access::configured() {
+        return Err("工作区请停用并撤销密钥，保留审计记录；不直接删除"
+            .to_string()
+            .into());
+    }
     if kind == "deployments" {
         let status = a.runtime.status().await?;
         if let Some(job) = status["job"].as_str() {
@@ -146,6 +154,12 @@ pub(crate) async fn resolve_action(
         }
         ("deployments", "start" | "verify") => {
             let c = prepared_config(a, &cat, id).await?;
+            if std::env::var("PHYXI_MODEL_NETWORK").is_ok() && c.engine == config::Engine::LlamaCpu
+            {
+                return Err("CPU 后端仅供原生本地测试；企业容器模式请选择 GPU 推理引擎"
+                    .to_string()
+                    .into());
+            }
             if action == "verify" {
                 assert_deployment(a, id).await?;
                 if a.gateway.running().await? {
@@ -174,6 +188,9 @@ pub(crate) async fn resolve_action(
         ("gateways", "certificate" | "gateway_start" | "gateway_stop" | "verify" | "publish") => {
             let profile: catalog::Gateway = cat.data(kind, id)?;
             g = profile.config;
+            if access::configured() {
+                g.workspace_scope = id.clone();
+            }
             if action == "certificate" {
                 if a.gateway.running().await? {
                     return Err("请先停止网关，再更换证书".to_string().into());
@@ -323,5 +340,81 @@ pub(crate) async fn certificate_upload(
     }
     Ok(Json(
         json!({"saved":true,"applied":false,"record":cat.get("gateways",&id)?}),
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CredentialAction {
+    operation: String,
+}
+pub(crate) async fn credential_status(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let cat = catalog::Catalog::load(&a.store)?;
+    let workspace: catalog::Workspace = cat.data("workspaces", &id)?;
+    if !access::configured() {
+        return Ok(Json(json!({"configured":false})));
+    }
+    let (status, mut data) = access::call(&a.runtime.data, &id, None).await?;
+    if status == 404 {
+        return Ok(Json(json!({"configured":true,"initialized":false})));
+    }
+    if status != 200 {
+        return Err("无法读取独立鉴权服务".to_string().into());
+    }
+    data["configured"] = json!(true);
+    data["initialized"] = json!(true);
+    data["matches_draft"] = json!(data["gateway"] == workspace.gateway);
+    Ok(Json(data))
+}
+pub(crate) async fn credential_change(
+    State(a): State<App>,
+    Path(id): Path<String>,
+    Json(body): Json<CredentialAction>,
+) -> Result<Json<Value>> {
+    let _permit = a
+        .gate
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中".into()))?;
+    let cat = catalog::Catalog::load(&a.store)?;
+    let workspace: catalog::Workspace = cat.data("workspaces", &id)?;
+    cat.get("gateways", &workspace.gateway)?;
+    if !["apply", "rotate", "revoke", "disable", "enable"].contains(&body.operation.as_str()) {
+        return Err("未知密钥操作".to_string().into());
+    }
+    if ["rotate", "enable"].contains(&body.operation.as_str()) {
+        let (status, current) = access::call(&a.runtime.data, &id, None).await?;
+        if status != 200 || current["gateway"] != workspace.gateway {
+            return Err(Error(
+                StatusCode::CONFLICT,
+                "请先应用当前工作区接入配置".into(),
+            ));
+        }
+    }
+    let (status, data) = access::call(
+        &a.runtime.data,
+        &id,
+        Some(json!({"operation":body.operation,"gateway":workspace.gateway})),
+    )
+    .await?;
+    if status != 200 {
+        return Err(Error(
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+            data["error"].as_str().unwrap_or("密钥操作未确认").into(),
+        ));
+    }
+    Ok(Json(data))
+}
+
+pub(crate) async fn workspace_requests(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    catalog::Catalog::load(&a.store)?.get("workspaces", &id)?;
+    Ok(Json(
+        crate::gateway_container::requests(&a.gateway, &id).await?,
     ))
 }

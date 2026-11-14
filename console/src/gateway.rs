@@ -15,6 +15,7 @@ use tokio::{
 #[serde(default, deny_unknown_fields)]
 pub struct GatewayConfig {
     pub domain: String,
+    pub workspace_scope: String,
     pub bind_ip: String,
     pub port: u16,
     pub allowed_cidrs: Vec<String>,
@@ -27,6 +28,7 @@ impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             domain: "localhost".into(),
+            workspace_scope: String::new(),
             bind_ip: "127.0.0.1".into(),
             port: 18443,
             allowed_cidrs: vec!["127.0.0.1/32".into()],
@@ -39,6 +41,14 @@ impl Default for GatewayConfig {
 }
 impl GatewayConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if self.workspace_scope.len() > 100
+            || !self
+                .workspace_scope
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b))
+        {
+            return Err("工作区入口标识无效".into());
+        }
         if self.domain.is_empty()
             || self.domain.len() > 253
             || !self
@@ -247,7 +257,7 @@ impl Gateway {
             .map(|v| format!("allow {v};"))
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(format!(
+        let mut rendered = format!(
             r#"worker_processes 1;
 pid {};
 error_log {} warn;
@@ -294,7 +304,37 @@ http {{
             quote(self.cert())?,
             quote(self.dir.join("server.key"))?,
             m.port
-        ))
+        );
+        if std::env::var("PHYXI_MODEL_NETWORK").is_ok() {
+            rendered = rendered.replace(
+                &format!("proxy_pass http://127.0.0.1:{};", m.port),
+                "proxy_pass http://phyxi-console-model:8000;",
+            );
+        }
+        if crate::access::configured() {
+            if c.workspace_scope.is_empty() {
+                return Err("独立鉴权模式要求使用具名网关对象".into());
+            }
+            let endpoint = std::env::var("PHYXI_ACCESS_URL").map_err(|_| "鉴权地址缺失")?;
+            if !endpoint.starts_with("http://")
+                || endpoint[7..].contains(['/', '?', '#', '@', '\n', '\r'])
+            {
+                return Err("鉴权服务地址无效".into());
+            }
+            rendered=rendered.replace(&format!(" map $http_authorization $client_allowed {{ default 0; \"Bearer {token}\" 1; }}"),"");
+            rendered=rendered.replace("   if ($client_allowed = 0) { return 401; }", "   auth_request /_phyxi_auth;\n   auth_request_set $workspace_id $upstream_http_x_phyxi_workspace;");
+            rendered=rendered.replace("  location ~ ^/v1/",&format!("  location = /_phyxi_auth {{ internal; proxy_connect_timeout 1s; proxy_read_timeout 2s; proxy_send_timeout 2s; proxy_next_upstream off; proxy_pass {endpoint}/check; proxy_pass_request_body off; proxy_set_header Content-Length \"\"; proxy_set_header Authorization $http_authorization; proxy_set_header X-Phyxi-Gateway {}; }}\n  location ~ ^/v1/",c.workspace_scope));
+            rendered=rendered.replace(" access_log off;",r#" map $uri $audit_route { default other; /v1/models models; /v1/chat/completions chat; }
+ log_format phyxi escape=json '{"type":"request","workspace_id":"$workspace_id","request_id":"$request_id","time":"$time_iso8601","route":"$audit_route","status":$status,"duration":$request_time}';
+ access_log /dev/stdout phyxi;"#);
+        }
+        if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+            rendered = rendered.replace(
+                &format!("listen {}:{} ssl;", c.bind_ip, c.port),
+                &format!("listen 0.0.0.0:{} ssl;", c.port),
+            );
+        }
+        Ok(rendered)
     }
     pub async fn start(&self, c: &GatewayConfig, m: &Config) -> Result<(), String> {
         if self.running().await? {
@@ -376,7 +416,13 @@ http {{
         let dir = self.dir.join("client-export");
         fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         fs::copy(self.dir.join("ca.pem"), dir.join("company-ca.pem")).map_err(|e| e.to_string())?;
-        fs::write(dir.join("workstation.token"), self.token()?).map_err(|e| e.to_string())?;
+        if crate::access::configured() {
+            if dir.join("workstation.token").exists() {
+                fs::remove_file(dir.join("workstation.token")).map_err(|e| e.to_string())?;
+            }
+        } else {
+            fs::write(dir.join("workstation.token"), self.token()?).map_err(|e| e.to_string())?;
+        }
         fs::write(dir.join("endpoint.json"),serde_json::to_vec_pretty(&serde_json::json!({"base_url":format!("https://{}:{}/v1",c.domain,c.port),"model":m.model_name,"provider":"phyxi-enterprise"})).unwrap()).map_err(|e|e.to_string())?;
         let inputs = if m.verify_images {
             vec!["text", "image"]
@@ -394,11 +440,13 @@ http {{
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
                 .map_err(|e| e.to_string())?;
-            fs::set_permissions(
-                dir.join("workstation.token"),
-                fs::Permissions::from_mode(0o600),
-            )
-            .map_err(|e| e.to_string())?;
+            if !crate::access::configured() {
+                fs::set_permissions(
+                    dir.join("workstation.token"),
+                    fs::Permissions::from_mode(0o600),
+                )
+                .map_err(|e| e.to_string())?;
+            }
         }
         Ok(dir)
     }

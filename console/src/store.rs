@@ -28,13 +28,38 @@ impl Store {
         CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, action TEXT NOT NULL, status TEXT NOT NULL, step TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP, config TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, message TEXT NOT NULL);
         UPDATE jobs SET status='interrupted', step='控制台重启；请检查运行状态，停止后再部署' WHERE status='running';").map_err(|e|e.to_string())?;
+        let has_source: bool = c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('audit') WHERE name='source')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if !has_source {
+            c.execute("ALTER TABLE audit ADD COLUMN source TEXT", [])
+                .map_err(|e| e.to_string())?;
+        }
         Ok(Self(Mutex::new(c)))
     }
-    pub fn audit(&self, actor: &str, action: &str, status: u16) -> Result<(), String> {
+    pub fn audit_source(
+        &self,
+        actor: &str,
+        action: &str,
+        status: u16,
+        source: Option<&str>,
+    ) -> Result<(), String> {
+        let source = source
+            .and_then(|s| s.parse::<std::net::IpAddr>().ok())
+            .map(|ip| ip.to_string());
         let c = self.0.lock().map_err(|e| e.to_string())?;
         c.execute(
-            "INSERT INTO audit(actor,action,status) VALUES(?1,?2,?3)",
-            params![actor, action.chars().take(256).collect::<String>(), status],
+            "INSERT INTO audit(actor,action,status,source) VALUES(?1,?2,?3,?4)",
+            params![
+                actor,
+                action.chars().take(256).collect::<String>(),
+                status,
+                source
+            ],
         )
         .map_err(|e| e.to_string())?;
         c.execute("DELETE FROM audit WHERE seq NOT IN (SELECT seq FROM audit ORDER BY seq DESC LIMIT 5000)",[]).map_err(|e|e.to_string())?;
@@ -43,9 +68,11 @@ impl Store {
     pub fn audit_rows(&self) -> Result<serde_json::Value, String> {
         let c = self.0.lock().map_err(|e| e.to_string())?;
         let mut q = c
-            .prepare("SELECT actor,action,status,created FROM audit ORDER BY seq DESC LIMIT 200")
+            .prepare(
+                "SELECT actor,action,status,created,source FROM audit ORDER BY seq DESC LIMIT 200",
+            )
             .map_err(|e| e.to_string())?;
-        let rows=q.query_map([],|r|Ok(serde_json::json!({"actor":r.get::<_,String>(0)?,"action":r.get::<_,String>(1)?,"status":r.get::<_,u16>(2)?,"created":r.get::<_,String>(3)?}))).map_err(|e|e.to_string())?;
+        let rows=q.query_map([],|r|Ok(serde_json::json!({"actor":r.get::<_,String>(0)?,"action":r.get::<_,String>(1)?,"status":r.get::<_,u16>(2)?,"created":r.get::<_,String>(3)?,"source":r.get::<_,Option<String>>(4)?}))).map_err(|e|e.to_string())?;
         Ok(serde_json::Value::Array(
             rows.collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string())?,
