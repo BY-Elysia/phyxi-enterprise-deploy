@@ -8,6 +8,7 @@ use catalog_api::{
 mod config;
 mod environment;
 mod gateway;
+mod gateway_container;
 mod host_metrics;
 mod presets;
 mod process;

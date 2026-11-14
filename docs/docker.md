@@ -33,3 +33,18 @@ docker compose logs --tail=100 console
 - 页面资源读数对应 Linux 宿主机或 Colima 虚拟机，依赖版本对应控制台容器，不代表 Mac 原生环境。
 - 镜像不内置 llama.cpp；原生 Mac CPU 测试配置会保留，但要在容器内执行，需要另行准备 Linux llama-server 及可访问的 GGUF。
 - 不会启动 GPUStack、Xinference、Semaphore，也不会拉取模型推理镜像或下载权重。
+
+## P1a：独立 Nginx 过渡模式
+
+独立网关配置覆盖文件为 `deployment/compose.gateway.yaml`。仅用于本地迁移验证，仍使用 host 网络及旧鉴权；不是已完成的企业网络/工作区安全方案。
+
+新状态目录先执行：
+
+```bash
+python3 scripts/prepare-gateway-container.py --data-dir /absolute/state/path
+docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
+```
+
+已有 `gateway/nginx.conf` 时初始化脚本拒绝覆盖。迁移前先确认旧网关已停止并备份配置，再人工移走旧 nginx.conf，执行初始化；不要覆盖运行配置。网关容器只挂载 gateway 子目录，不挂载 Docker socket、控制台数据库或模型权重。控制台通过标签和完全一致的目录挂载核对归属，校验后重载配置，读取运行配置摘要确认加载成功；控制台对象/进程重建后从持久化快照和实际摘要恢复状态。停止网关只停用业务监听，Nginx 容器保留诊断监听 127.0.0.1:18765。
+
+真实容器验证：`python3 scripts/test-gateway-container.py`。该脚本使用独立临时目录、唯一容器名，检查 TLS 匿名拒绝、控制对象重建恢复、无效配置保留原服务、错误挂载归属拒绝及停止，只清理自身创建的容器。不验证 GPU 推理或工作区独立密钥。

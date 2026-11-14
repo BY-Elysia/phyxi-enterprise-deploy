@@ -1,0 +1,26 @@
+# Transitional P1a: independent Nginx, retaining loopback networking until P1b.
+services:
+  console:
+    environment:
+      PHYXI_GATEWAY_CONTAINER: phyxi-gateway-1
+    depends_on:
+      gateway:
+        condition: service_started
+  gateway:
+    image: nginx:1.28-bookworm
+    container_name: phyxi-gateway-1
+    restart: unless-stopped
+    network_mode: host
+    labels:
+      io.phyxi.role: gateway
+    entrypoint: ["nginx"]
+    command: ["-p", "${PHYXI_DATA_DIR}/gateway", "-c", "${PHYXI_DATA_DIR}/gateway/nginx.conf", "-g", "daemon off;"]
+    volumes:
+      - type: bind
+        source: ${PHYXI_DATA_DIR}/gateway
+        target: ${PHYXI_DATA_DIR}/gateway
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

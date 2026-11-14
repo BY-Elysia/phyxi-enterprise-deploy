@@ -99,6 +99,9 @@ impl Gateway {
         }
     }
     pub async fn running(&self) -> Result<bool, String> {
+        if crate::gateway_container::name().is_some() {
+            return crate::gateway_container::running(self).await;
+        }
         let mut l = self.live.lock().await;
         if let Some(p) = l.as_mut() {
             return Ok(p.child.try_wait().map_err(|e| e.to_string())?.is_none());
@@ -106,6 +109,9 @@ impl Gateway {
         Ok(false)
     }
     pub async fn matches(&self, c: &GatewayConfig, m: &Config) -> Result<(), String> {
+        if crate::gateway_container::name().is_some() {
+            return crate::gateway_container::matches(self, c, m).await;
+        }
         let mut l = self.live.lock().await;
         let p = l.as_mut().ok_or("网关未启动")?;
         if p.child.try_wait().map_err(|e| e.to_string())?.is_some()
@@ -306,6 +312,9 @@ http {{
         ])
         .await?;
         let text = self.render(c, m, &self.token()?)?;
+        if crate::gateway_container::name().is_some() {
+            return crate::gateway_container::start(self, c, m, &text).await;
+        }
         let path = self.dir.join("nginx.conf");
         fs::write(&path, text).map_err(|e| e.to_string())?;
         let binary = std::env::var("PHYXI_NGINX").unwrap_or("nginx".into());
@@ -346,6 +355,9 @@ http {{
         Ok(())
     }
     pub async fn stop(&self) -> Result<(), String> {
+        if crate::gateway_container::name().is_some() {
+            return crate::gateway_container::stop(self).await;
+        }
         let mut l = self.live.lock().await;
         if let Some(p) = l.as_mut() {
             if p.child.try_wait().map_err(|e| e.to_string())?.is_none() {
