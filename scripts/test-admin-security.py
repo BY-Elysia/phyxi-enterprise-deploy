@@ -43,6 +43,9 @@ with tempfile.TemporaryDirectory() as td:
             except OSError:time.sleep(.1)
         else:raise RuntimeError(proc.stderr.read().decode())
         assert info['mode']=='password' and not info['authenticated']
+        landing=op.open(base.removesuffix('/api')+'/')
+        assert landing.url.endswith('/login')
+        page=landing.read().decode();assert 'id="login-form"' in page and 'id="navigation"' not in page
         assert req('/catalog',headers={'Authorization':'Bearer '+(data/'token').read_text()},session=False)[0]==401
         assert req('/auth/login','POST',{'password':password},{'Origin':'https://evil.invalid'},False)[0]==403
         assert req('/auth/login','POST',{'password':'wrong'},session=False)[0]==401
@@ -52,6 +55,8 @@ with tempfile.TemporaryDirectory() as td:
         cookie=h['Set-Cookie'].split(';')[0];csrf=info['csrf']
         assert h['Cache-Control']=='no-store'
         assert req('/catalog')[0]==200
+        page=op.open(urllib.request.Request(base.removesuffix('/api')+'/',headers={'Cookie':cookie})).read().decode()
+        assert 'id="navigation"' in page and 'id="connection"' not in page
         payload={'name':'test gateway','revision':0,'data':{'deployment':'','config':{'domain':'localhost','bind_ip':'127.0.0.1','port':18443,'allowed_cidrs':['127.0.0.1/32'],'tls_mode':'self_signed','cert_file':'','key_file':'','ca_file':''}}}
         route='/catalog/gateways/test-gateway'
         assert req(route,'PUT',payload)[0]==401

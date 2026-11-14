@@ -168,7 +168,25 @@ fn router(app: App) -> Router {
         .route("/api/auth/logout", post(admin::logout))
         .route(
             "/",
-            get(|| async { Html(include_str!("../web/index.html")) }),
+            get(|State(a): State<App>, headers: axum::http::HeaderMap| async move {
+                if a.admin.as_ref().is_some_and(|admin| !admin.authorize(&headers, false)) {
+                    return axum::response::Redirect::to("/login").into_response();
+                }
+                Html(include_str!("../web/index.html")).into_response()
+            }),
+        )
+        .route(
+            "/login",
+            get(|| async { Html(include_str!("../web/login.html")) }),
+        )
+        .route(
+            "/login.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/login.js"),
+                )
+            }),
         )
         .route(
             "/app.js",

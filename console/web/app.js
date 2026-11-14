@@ -10,7 +10,7 @@ const instanceState=value=>({running:'运行中',absent:'未部署',exited:'已�
 let presets={images:[],models:[],endpoints:[]};
 let authMode='token',csrf='',comparisonUpdated=0;
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},editing=null,connected=false,busy=false,jobs=[],activeJob='',runtime={};
-$('token').value=token;
+
 const fields={
  models:[['model_name','默认服务模型名','text','phyxi-model'],['model_path','本地权重路径（自行准备时填写）','text','/srv/phyxi/models/model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint','https://huggingface.co'],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
  images:[['engine','推理引擎','gpu-engine','vllm'],['reference','Docker 镜像地址（标签或摘要）','text','']],
@@ -20,7 +20,7 @@ const fields={
  workspaces:[['gateway','企业网关','ref:gateways',''],['credential_env','客户端凭据环境变量名','text','PHYXI_API_KEY']]
 };
 const hints={models:'保存时只查询版本信息，不下载权重。保存后点击下载权重；自定义支持 owner/model、Hugging Face 或 hf-mirror 仓库地址。GPU 引擎使用完整权重，CPU 测试使用 GGUF。',images:'选择预设只填写地址，不下载。保存后点击下载推理引擎镜像，或自行 docker pull；启动只使用已准备的本地镜像，并固定镜像 ID。',runtimes:'GPU 推理引擎镜像与参数需使用同一引擎。显存比例在 vLLM 对应 gpu-memory-utilization，在 SGLang 对应 mem-fraction-static；CPU 测试限制为上下文 128–2048、单并发。',deployments:'可以先保存未完成的组合。启动前必须补齐引用；全服务器只允许一个运行实例。TP 自动等于所选 GPU 数量。',gateways:'可先独立保存网关配置，启动时再选择已运行的部署。证书路径位于服务器；自签模式仅用于回环测试。',workspaces:'工作区定义客户端接入身份。先应用接入配置，再生成独立 API Key；每个工作区只有一个有效密钥，停用会撤销密钥，已有请求允许完成。'};
-async function api(path,options={}){const r=await fetch('/api'+path,{...options,headers:{...(authMode==='token'?{Authorization:'Bearer '+token}:{'X-CSRF-Token':csrf}),'Content-Type':'application/json'}});const d=await r.json();if(!r.ok)throw Error(d.error||JSON.stringify(d));return d;}
+async function api(path,options={}){const r=await fetch('/api'+path,{...options,headers:{...(authMode==='token'?{Authorization:'Bearer '+token}:{'X-CSRF-Token':csrf}),'Content-Type':'application/json'}});if(r.status===401){connected=false;location.replace('/login');throw Error('登录已过期，请重新登录');}const d=await r.json();if(!r.ok)throw Error(d.error||JSON.stringify(d));return d;}
 function notice(t,error=false){$('notice').textContent=t;$('notice').className=error?'error':'';}
 function safe(fn){return async()=>{try{await fn();}catch(e){notice(e.message,true);}};}
 function button(text,fn){const b=document.createElement('button');b.textContent=text;b.onclick=safe(fn);return b;}
@@ -85,18 +85,11 @@ async function inspect(){
  $('prepare').disabled=!h.host_setup_enabled||h.platform!=='linux';$('host-policy').textContent=h.host_setup_enabled?h.notes:'此实例未启用系统安装。仅 Ubuntu 22.04/24.04 的受控服务可安装缺失依赖；本地预览不执行系统安装。';
 }
 $('inspect').onclick=safe(inspect);$('prepare').onclick=safe(()=>submit('prepare'));$('cancel').onclick=safe(async()=>{await api('/actions/cancel',{method:'POST'});notice('已申请在安全边界取消。');});
-async function finishConnect(){await load();connected=true;$('connection').open=false;$('logout').hidden=authMode!=='password';notice(authMode==='password'?'已登录管理员账户':'已连接控制台');await refresh();if(view==='environment')await inspect();}
-async function connect(){
- if(authMode==='password'){
-  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('token').value})});
-  $('token').value='';const data=await r.json();if(!r.ok)throw Error(data.error||'登录失败');csrf=data.csrf;
- }else{token=$('token').value.trim();sessionStorage.setItem('phyxi-token',token);}
- await finishConnect();
-}
-$('logout').onclick=safe(async()=>{const r=await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});if(!r.ok)throw Error('退出失败，请刷新页面');csrf='';connected=false;catalog={};$('logout').hidden=true;$('connection').open=true;render();notice('已退出登录');});
-async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法读取登录方式');const data=await r.json();authMode=data.mode;if(authMode==='password'){$('username-label').hidden=false;$('connection').querySelector('summary').textContent='管理员登录';sessionStorage.removeItem('phyxi-token');token='';$('token').value='';$('token').autocomplete='current-password';$('credential-label').textContent='管理员密码';$('connect').textContent='登录';if(data.authenticated){csrf=data.csrf;await finishConnect();}}else if(token)await finishConnect();}
+async function finishConnect(){await load();connected=true;document.body.classList.remove('auth-pending');await refresh();if(view==='environment')await inspect();}
+$('logout').onclick=safe(async()=>{if(authMode==='password'){const r=await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});if(!r.ok&&r.status!==401&&r.status!==403)throw Error('退出失败，请重试');}sessionStorage.removeItem('phyxi-token');connected=false;location.replace('/login');});
+async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法验证登录状态，请刷新重试');const data=await r.json();authMode=data.mode;if(authMode==='password'){sessionStorage.removeItem('phyxi-token');token='';if(!data.authenticated){location.replace('/login');return;}csrf=data.csrf;}else if(!token){location.replace('/login');return;}await finishConnect();}
 async function auditView(){const rows=await api('/audit');const box=$('management-audit');box.replaceChildren();for(const row of rows){const p=document.createElement('p');p.textContent=`${row.created} · ${row.actor} · ${row.source||'本地/未知来源'} · ${row.action} · HTTP ${row.status}`;box.append(p);}if(!rows.length)box.textContent='暂无管理员操作记录';}
-$('connect').onclick=safe(connect);showView(location.hash.slice(1));initAuth().catch(e=>notice(e.message,true));setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
+showView(location.hash.slice(1));initAuth().catch(()=>location.replace('/login'));setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
 
 async function loadGpuChoices(){
  const input=$('record-form').elements.gpu_uuids;
