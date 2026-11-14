@@ -8,23 +8,61 @@ pub struct Check {
     pub name: String,
     pub ready: bool,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<&'static str>,
 }
 async fn probe(name: &str, program: &str, args: &[&str]) -> Check {
     let mut c = Command::new(program);
     c.args(args);
     match execute(c, None, 10).await {
         Ok(s) => Check {
+            status: None,
             name: name.into(),
             ready: true,
             detail: s.chars().take(800).collect(),
         },
         Err(e) => Check {
+            status: None,
             name: name.into(),
             ready: false,
             detail: e,
         },
     }
 }
+// Query the same Docker daemon used for deployment, not the console filesystem.
+fn toolkit_result(result: Result<String, String>) -> Check {
+    let (ready, status, detail) = match result {
+        Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(value) if value.is_object() => {
+                if value.get("nvidia").is_some_and(|v| v.is_object()) {
+                    (true, "已配置", "宿主机 Docker 已注册 NVIDIA runtime。此检查不启动容器；GPU 实际可用性以模型启动验收为准。".into())
+                } else {
+                    (false, "未配置", "宿主机 Docker 未注册 NVIDIA runtime；请检查 NVIDIA Container Toolkit 的安装和 Docker 配置。不能据此判定工具包未安装；仅使用 CDI 的环境需单独验收。".into())
+                }
+            }
+            _ => (false, "检测失败", "Docker 返回了无法解析的 runtime 信息，无法判断 NVIDIA 容器支持状态。".into()),
+        },
+        Err(e) => (false, "无法检测", format!("无法读取宿主机 Docker runtime 配置；这不代表 NVIDIA Container Toolkit 未安装。诊断：{e}")),
+    };
+    Check {
+        name: "NVIDIA Toolkit".into(),
+        ready,
+        status: Some(status),
+        detail,
+    }
+}
+async fn toolkit(r: &Runtime) -> Check {
+    let mut command = Command::new("docker");
+    command.args([
+        "--host",
+        &r.docker_host,
+        "info",
+        "--format",
+        "{{json .Runtimes}}",
+    ]);
+    toolkit_result(execute(command, None, 10).await)
+}
+
 pub async fn inspect(r: &Runtime) -> serde_json::Value {
     let nginx = std::env::var("PHYXI_NGINX").unwrap_or("nginx".into());
     let docker_args = [
@@ -45,7 +83,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
             ]
         ),
         probe("容器引擎", "docker", &docker_args),
-        probe("NVIDIA Toolkit", "nvidia-ctk", &["--version"]),
+        toolkit(r),
         probe("企业网关", &nginx, &["-v"]),
         probe("证书工具", "openssl", &["version"])
     );
@@ -324,5 +362,29 @@ mod tests {
     fn provisioning_is_separate() {
         assert_eq!(plan().len(), 5);
         assert!(!plan().join(" ").contains("安装驱动"));
+    }
+}
+
+#[cfg(test)]
+mod detection_tests {
+    use super::toolkit_result;
+
+    #[test]
+    fn runtime_registration_is_distinct_from_installation_and_probe_failure() {
+        let configured = toolkit_result(Ok(
+            r#"{"nvidia":{"path":"nvidia-container-runtime"},"runc":{}}"#.into(),
+        ));
+        assert!(configured.ready);
+        assert_eq!(configured.status, Some("已配置"));
+        let missing = toolkit_result(Ok(r#"{"runc":{}}"#.into()));
+        assert!(!missing.ready);
+        assert_eq!(missing.status, Some("未配置"));
+        for raw in ["", "null", "[]", "not json"] {
+            assert_eq!(toolkit_result(Ok(raw.into())).status, Some("检测失败"));
+        }
+        let unavailable = toolkit_result(Err("permission denied".into()));
+        assert!(!unavailable.ready);
+        assert_eq!(unavailable.status, Some("无法检测"));
+        assert!(unavailable.detail.contains("permission denied"));
     }
 }

@@ -71,14 +71,14 @@ function dependencyCard(c,platform){
  let version=detail.match(/(?:nginx\/|OpenSSL\s+|Docker\s+|version\s+)([v\d][\w.+-]*)/i)?.[1];
  if(c.name==='系统')version=platform==='macos'?'macOS':platform==='linux'?'Linux':platform;
  if(c.name==='显卡驱动')version=detail.split(',')[1]?.trim();
- const card=metricCard(names[c.name]||c.name,na?'不适用':!c.ready?'未就绪':version||'已就绪',na?'本地 CPU 测试不需要此组件。':c.ready?'已检测到此组件。':'未安装或当前无法访问，请查看诊断详情。');
+ const card=metricCard(names[c.name]||c.name,na?'不适用':c.status||(!c.ready?'未就绪':version||'已就绪'),na?'本地 CPU 测试不需要此组件。':c.status?detail:c.ready?'已检测到此组件。':'未安装或当前无法访问，请查看诊断详情。');
  card.classList.add('dependency-card');const badge=document.createElement('span');badge.className='state '+(na?'':c.ready?'succeeded':'failed');badge.textContent=na?'无需安装':c.ready?'正常':'需检查';card.prepend(badge);
  if(!na){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='诊断详情';const raw=document.createElement('pre');raw.textContent=detail;details.append(summary,raw);card.append(details);}return card;
 }
 async function fetchEnvironment(){await loadServices();
  const h=await api('/environment'),m=h.metrics||{};
  const time=m.sampled_unix?new Date(m.sampled_unix*1000).toLocaleTimeString():'未知';
- $('host-platform').textContent=(h.containerized?'Docker 模式 · 系统资源来自容器所在 Linux 主机 / 虚拟机，依赖版本来自容器':h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
+ $('host-platform').textContent=(h.containerized?'Docker 模式 · 系统资源来自容器所在 Linux 主机 / 虚拟机，NVIDIA 容器支持来自宿主机 Docker，其他工具版本来自控制台容器':h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
  $('host-metrics').replaceChildren();
  const mem=m.memory,disk=m.disk;
  $('host-metrics').append(metricCard('内存占用',mem?bytes(mem.used_bytes)+' / '+bytes(mem.total_bytes):'暂无数据',mem?(mem.estimated?'估算占用；空闲及可回收约 ':'可用 ')+bytes(mem.available_bytes):'无法读取系统内存信息。',mem?mem.used_bytes/mem.total_bytes*100:null));
