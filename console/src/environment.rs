@@ -84,7 +84,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
             }
         }
     }
-    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"metrics":metrics,"gpus":gpus,"vllm":vllm,"engine_name":engine_name,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
+    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"containerized":Path::new("/.dockerenv").exists(),"metrics":metrics,"gpus":gpus,"vllm":vllm,"engine_name":engine_name,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
 }
 pub fn plan() -> Vec<&'static str> {
     vec![

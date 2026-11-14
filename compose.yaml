@@ -1,0 +1,32 @@
+name: phyxi
+services:
+  console:
+    image: phyxi-console:local
+    build: .
+    restart: unless-stopped
+    # Same network as the Docker daemon: model endpoints remain on loopback.
+    network_mode: host
+    environment:
+      PHYXI_PORT: "8765"
+      PHYXI_STATE_DIR: ${PHYXI_DATA_DIR:?Set PHYXI_DATA_DIR to an absolute host directory}
+      PHYXI_DOCKER_HOST: unix:///var/run/docker.sock
+      PHYXI_ENABLE_HOST_SETUP: "0"
+    volumes:
+      # Identical paths are required when the daemon mounts downloaded weights.
+      - type: bind
+        source: ${PHYXI_DATA_DIR}
+        target: ${PHYXI_DATA_DIR}
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8765/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

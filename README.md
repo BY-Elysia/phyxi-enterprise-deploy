@@ -119,3 +119,7 @@ python3 scripts/test-composition.py
 模型权重预设提供 Qwen3-0.6B、Qwen3-8B、GLM-4-9B-0414 的仓库地址，也可自定义仓库或填写已准备好的服务器路径。保存来源时仅查询版本元数据，将 main/tag 固定为 commit；点击「下载权重」才会下载文件。预设不会预装任何模型。
 
 部署前先确认两类资源均已准备，选择匹配的运行环境与推理参数，再组合启动。启动不会自动拉取镜像或下载权重。SGLang 已通过参数及生命周期协议测试，实际 NVIDIA 推理兼容性仍需服务器验证。
+
+### Docker 启动
+
+已提供根目录 `Dockerfile` 与 `compose.yaml`。在 `.env` 设置绝对路径 `PHYXI_DATA_DIR` 后执行 `docker compose up -d --build`，访问 http://127.0.0.1:8765 。支持复用已有状态目录；运行镜像不包含 Rust 工具链或模型。网络、目录挂载和 GPU/CPU 边界见 [Docker 启动说明](docs/docker.md)。

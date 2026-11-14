@@ -62,7 +62,7 @@ function dependencyCard(c,platform){
 async function inspect(){
  const h=await api('/environment'),m=h.metrics||{};
  const time=m.sampled_unix?new Date(m.sampled_unix*1000).toLocaleTimeString():'未知';
- $('host-platform').textContent=(h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
+ $('host-platform').textContent=(h.containerized?'Docker 模式 · 系统资源来自容器所在 Linux 主机 / 虚拟机，依赖版本来自容器':h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
  $('host-metrics').replaceChildren();
  const mem=m.memory,disk=m.disk;
  $('host-metrics').append(metricCard('内存占用',mem?bytes(mem.used_bytes)+' / '+bytes(mem.total_bytes):'暂无数据',mem?(mem.estimated?'估算占用；空闲及可回收约 ':'可用 ')+bytes(mem.available_bytes):'无法读取系统内存信息。',mem?mem.used_bytes/mem.total_bytes*100:null));
