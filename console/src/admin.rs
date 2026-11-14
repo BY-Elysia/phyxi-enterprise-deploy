@@ -102,8 +102,9 @@ impl Admin {
     }
 }
 pub fn set_password(data: &Path, password: &str) -> Result<(), String> {
-    if !(12..=256).contains(&password.len()) {
-        return Err("管理员密码需要 12–256 字节".into());
+    let minimum = if insecure_local() { 8 } else { 12 };
+    if !(minimum..=256).contains(&password.len()) {
+        return Err(format!("管理员密码需要 {minimum}–256 字节"));
     }
     let salt =
         SaltString::encode_b64(uuid::Uuid::new_v4().as_bytes()).map_err(|e| e.to_string())?;
@@ -127,7 +128,12 @@ pub fn set_password(data: &Path, password: &str) -> Result<(), String> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Login {
+    #[serde(default = "admin_username")]
+    username: String,
     password: String,
+}
+fn admin_username() -> String {
+    "admin".into()
 }
 fn origin_allowed(h: &HeaderMap) -> bool {
     if h.get("sec-fetch-site").is_some_and(|v| v == "cross-site") {
@@ -169,7 +175,7 @@ pub async fn login(
         return error(StatusCode::FORBIDDEN, "登录来源不允许");
     }
     if body.password.len() > 256 {
-        return error(StatusCode::UNAUTHORIZED, "密码错误");
+        return error(StatusCode::UNAUTHORIZED, "账号或密码错误");
     }
     {
         let mut m = admin.memory.lock().unwrap();
@@ -194,11 +200,12 @@ pub async fn login(
     let hash = admin.hash.clone();
     let valid = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        PasswordHash::new(&hash).is_ok_and(|h| {
-            Argon2::default()
-                .verify_password(body.password.as_bytes(), &h)
-                .is_ok()
-        })
+        body.username == "admin"
+            && PasswordHash::new(&hash).is_ok_and(|h| {
+                Argon2::default()
+                    .verify_password(body.password.as_bytes(), &h)
+                    .is_ok()
+            })
     })
     .await
     .unwrap_or(false);
@@ -206,7 +213,7 @@ pub async fn login(
         let _ = app
             .store
             .audit_source("admin", "login", 401, source(&headers));
-        return error(StatusCode::UNAUTHORIZED, "密码错误");
+        return error(StatusCode::UNAUTHORIZED, "账号或密码错误");
     }
     let id = random();
     let csrf = random();

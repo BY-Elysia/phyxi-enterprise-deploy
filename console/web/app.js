@@ -85,13 +85,13 @@ $('inspect').onclick=safe(inspect);$('prepare').onclick=safe(()=>submit('prepare
 async function finishConnect(){await load();connected=true;$('connection').open=false;$('logout').hidden=authMode!=='password';notice('已连接');await refresh();if(view==='environment')await inspect();}
 async function connect(){
  if(authMode==='password'){
-  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('token').value})});
+  const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value,password:$('token').value})});
   $('token').value='';const data=await r.json();if(!r.ok)throw Error(data.error||'登录失败');csrf=data.csrf;
  }else{token=$('token').value.trim();sessionStorage.setItem('phyxi-token',token);}
  await finishConnect();
 }
 $('logout').onclick=safe(async()=>{const r=await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});if(!r.ok)throw Error('退出失败，请刷新页面');csrf='';connected=false;catalog={};$('logout').hidden=true;$('connection').open=true;render();notice('已退出登录');});
-async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法读取登录方式');const data=await r.json();authMode=data.mode;if(authMode==='password'){sessionStorage.removeItem('phyxi-token');token='';$('token').value='';$('token').autocomplete='current-password';$('credential-label').textContent='管理员密码';$('connect').textContent='登录';if(data.authenticated){csrf=data.csrf;await finishConnect();}}else if(token)await finishConnect();}
+async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法读取登录方式');const data=await r.json();authMode=data.mode;if(authMode==='password'){$('username-label').hidden=false;$('connection').querySelector('summary').textContent='管理员登录';sessionStorage.removeItem('phyxi-token');token='';$('token').value='';$('token').autocomplete='current-password';$('credential-label').textContent='管理员密码';$('connect').textContent='登录';if(data.authenticated){csrf=data.csrf;await finishConnect();}}else if(token)await finishConnect();}
 async function auditView(){const rows=await api('/audit');const box=$('management-audit');box.replaceChildren();for(const row of rows){const p=document.createElement('p');p.textContent=`${row.created} · ${row.actor} · ${row.source||'本地/未知来源'} · ${row.action} · HTTP ${row.status}`;box.append(p);}if(!rows.length)box.textContent='暂无管理员操作记录';}
 $('connect').onclick=safe(connect);showView(location.hash.slice(1));initAuth().catch(e=>notice(e.message,true));setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
 

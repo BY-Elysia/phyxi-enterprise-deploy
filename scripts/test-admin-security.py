@@ -15,6 +15,10 @@ op=urllib.request.build_opener(urllib.request.ProxyHandler({}))
 with tempfile.TemporaryDirectory() as td:
     data=Path(td)
     env=os.environ.copy(); env['PHYXI_STATE_DIR']=td
+    rejected=subprocess.run([str(binary),'--set-admin'],input='shortpass',text=True,env=env,capture_output=True)
+    assert rejected.returncode!=0 and not (data/'admin.hash').exists()
+    local=env.copy();local['PHYXI_LOCAL_HTTP_LOGIN']='1'
+    subprocess.run([str(binary),'--set-admin'],input='shortpass',text=True,env=local,check=True)
     password='test-only-password-12345'
     subprocess.run([str(binary),'--set-admin'],input=password,text=True,env=env,check=True)
     assert password not in (data/'admin.hash').read_text()
@@ -42,7 +46,8 @@ with tempfile.TemporaryDirectory() as td:
         assert req('/catalog',headers={'Authorization':'Bearer '+(data/'token').read_text()},session=False)[0]==401
         assert req('/auth/login','POST',{'password':password},{'Origin':'https://evil.invalid'},False)[0]==403
         assert req('/auth/login','POST',{'password':'wrong'},session=False)[0]==401
-        code,info,h=req('/auth/login','POST',{'password':password},session=False);assert code==200
+        assert req('/auth/login','POST',{'username':'other','password':password},session=False)[0]==401
+        code,info,h=req('/auth/login','POST',{'username':'admin','password':password},session=False);assert code==200
         assert all(s in h['Set-Cookie'] for s in ('Secure','HttpOnly','SameSite=Strict','__Host-phyxi_session'))
         cookie=h['Set-Cookie'].split(';')[0];csrf=info['csrf']
         assert h['Cache-Control']=='no-store'

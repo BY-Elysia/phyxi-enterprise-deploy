@@ -17,7 +17,7 @@ docker compose ps
 docker compose logs --tail=100 console
 ```
 
-访问 http://127.0.0.1:8765 。令牌仍保存在状态目录的 `token` 文件中。已有数据库、配置、操作记录、owner 和令牌直接复用，不重建；升级前建议停服务后备份整个目录。`.env` 不提交 Git。
+访问 http://127.0.0.1:8765 。本地初始化管理员后使用 `admin` 账户和密码登录；旧令牌不再接受。首次安装需先使用 `--set-admin` 初始化，未初始化目录仅保留兼容开发入口。已有数据库、配置、操作记录、owner 和令牌直接复用，不重建；升级前建议停服务后备份整个目录。`.env` 不提交 Git。
 
 重启：`docker compose restart console`。停止：`docker compose stop console`。容器随 Docker 启动恢复运行（unless-stopped）；macOS 重启后需要启动 Colima。镜像使用多阶段构建，运行镜像只包含编译好的控制台、Docker 客户端、Nginx、OpenSSL、curl 和资源采样工具，不包含 Rust 编译器或模型权重。
 
@@ -55,7 +55,7 @@ docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
 
 企业模式已提供 HTTPS 管理入口；不要把本地兼容接口直接发布到内网。
 
-先停止控制台，对同一状态目录执行 `scripts/set-admin-password.py --data-dir /absolute/state/path --binary /absolute/path/phyxi-console`。脚本用隐藏输入读取密码，经 stdin 传入，不放入命令参数。容器部署可在停止 console 后使用 `docker compose run --rm -T console --set-admin` 从安全的 stdin 输入密码（不把明文写进命令或提交文件）。必须使用 Linux 容器二进制或当前主机兼容的二进制。密码至少 12 字节；admin.hash 仅存 Argon2id 哈希。服务锁防止运行中重置；重启使内存会话失效。
+先停止控制台，对同一状态目录执行 `scripts/set-admin-password.py --data-dir /absolute/state/path --binary /absolute/path/phyxi-console`。脚本用隐藏输入读取密码，经 stdin 传入，不放入命令参数。容器部署可在停止 console 后使用 `docker compose run --rm -T console --set-admin` 从安全的 stdin 输入密码（不把明文写进命令或提交文件）。必须使用 Linux 容器二进制或当前主机兼容的二进制。企业密码至少 12 字节；明确启用 `PHYXI_LOCAL_HTTP_LOGIN=1` 的回环开发模式允许至少 8 字节。账户固定为 admin，admin.hash 仅存 Argon2id 哈希。服务锁防止运行中重置；重启使内存会话失效。
 
 存在 admin.hash 时前端自动切换为管理员密码登录，旧 Bearer Token 被拒绝。正式会话 Cookie 强制 Secure、HttpOnly、SameSite=Strict，有效期 8 小时；写操作需要 CSRF token。开发回环 HTTP 调试可显式设置 `PHYXI_LOCAL_HTTP_LOGIN=1`，仅限本地环境，不能作为企业 HTTPS 的替代。登录限速为全管理员入口每分钟 5 次、最多 32 个有效会话；无多账号或 SSO。
 
