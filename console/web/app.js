@@ -122,7 +122,7 @@ function addPresetPicker(kind,isExisting){
  const hint=document.createElement('p');hint.className='hint';
  const fill=()=>{const preset=entries.find(p=>p.id===select.value);if(kind==='images')$('record-form').elements.reference.parentElement.hidden=!!preset;if(!preset){if(kind==='models'){const f=$('record-form').elements;f.source_repo.value='';f.source_revision.value='main';f.source_file.value='';}hint.textContent=select.value==='local'?'填写已准备好的服务器模型目录或 GGUF 文件路径，无需下载。':'请在下方填写自定义来源地址。';return;}const f=$('record-form').elements;f.record_name.value=preset.name;if(kind==='images'){f.reference.value=preset.reference;f.engine.value=preset.engine;}else{f.model_name.value=preset.model_name;f.source_repo.value=preset.repo;f.source_revision.value=preset.revision;f.source_file.value='';}hint.textContent=preset.note;};
  select.onchange=fill;label.append(select,hint);$('editor-fields').prepend(label);
- if(!isExisting&&entries.length){select.value=entries[0].id;fill();}else if(kind==='images'){const match=entries.find(p=>p.reference===$('record-form').elements.reference.value);if(match){select.value=match.id;$('record-form').elements.reference.parentElement.hidden=true;hint.textContent=match.note;}}
+ if(!isExisting&&entries.length){select.value=entries[0].id;fill();}else if(kind==='images'){const f=$('record-form').elements;const match=entries.find(p=>p.reference===f.reference.value)||(isDefaultImage(f.reference.value)?entries.find(p=>p.engine===f.engine.value):null);if(match){select.value=match.id;$('record-form').elements.reference.parentElement.hidden=true;hint.textContent=match.note;}}
 }
 async function assetStatus(kind,id){
  const result=await api(`/${kind}/${id}/status`);if(view!==kind||selection[view]!==id)return;
