@@ -399,6 +399,75 @@ http {{
         }
         Ok(())
     }
+    pub async fn apply_config(&self, c: &GatewayConfig, m: &Config) -> Result<(), String> {
+        if crate::gateway_container::name().is_none() {
+            return Err("在线应用仅支持独立 Nginx 容器；原生测试请停止后重新启动网关".into());
+        }
+        if !self.running().await? {
+            return Err("请先启动网关；在线应用只用于运行中的网关".into());
+        }
+        c.validate()?;
+        let directory = self.dir.join(format!("tls-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&directory).map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+            .map_err(|e| e.to_string())?;
+        let work = async {
+            let sources = if c.tls_mode == "enterprise" {
+                vec![
+                    PathBuf::from(&c.cert_file),
+                    PathBuf::from(&c.key_file),
+                    PathBuf::from(&c.ca_file),
+                ]
+            } else {
+                vec![
+                    self.cert(),
+                    self.dir.join("server.key"),
+                    self.dir.join("ca.pem"),
+                ]
+            };
+            for (src, name) in sources.iter().zip(["server.pem", "server.key", "ca.pem"]) {
+                fs::copy(src, directory.join(name)).map_err(|e| e.to_string())?;
+                fs::set_permissions(directory.join(name), fs::Permissions::from_mode(0o600))
+                    .map_err(|e| e.to_string())?;
+            }
+            let mut candidate = c.clone();
+            candidate.tls_mode = "enterprise".into();
+            candidate.cert_file = directory.join("server.pem").display().to_string();
+            candidate.key_file = directory.join("server.key").display().to_string();
+            candidate.ca_file = directory.join("ca.pem").display().to_string();
+            self.validate_certificates(&candidate).await?;
+            let text = self
+                .render(c, m, &self.token()?)?
+                .replace(
+                    &format!("ssl_certificate \"{}\";", self.cert().display()),
+                    &format!("ssl_certificate \"{}\";", candidate.cert_file),
+                )
+                .replace(
+                    &format!(
+                        "ssl_certificate_key \"{}\";",
+                        self.dir.join("server.key").display()
+                    ),
+                    &format!("ssl_certificate_key \"{}\";", candidate.key_file),
+                );
+            crate::gateway_container::start(self, c, m, &text).await?;
+            for name in ["server.pem", "server.key", "ca.pem"] {
+                fs::copy(directory.join(name), self.dir.join(name)).map_err(|e| e.to_string())?;
+                fs::set_permissions(self.dir.join(name), fs::Permissions::from_mode(0o600))
+                    .map_err(|e| e.to_string())?;
+            }
+            fs::write(
+                self.dir.join("certificate-config.json"),
+                serde_json::to_vec(c).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        .await;
+        // Successful configurations reference this immutable directory. Keep it on ambiguous
+        // post-reload failures as well; deleting it could break an already active certificate.
+        work
+    }
     pub async fn stop(&self) -> Result<(), String> {
         if crate::gateway_container::name().is_some() {
             return crate::gateway_container::stop(self).await;

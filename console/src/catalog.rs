@@ -49,6 +49,8 @@ pub struct Parameters {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Deployment {
+    #[serde(default)]
+    pub model_name: String,
     pub model: String,
     pub image: String,
     pub runtime: String,
@@ -182,7 +184,11 @@ impl Catalog {
         let c = Config {
             source: m.source,
             engine: r.engine,
-            model_name: m.model_name,
+            model_name: if d.model_name.is_empty() {
+                m.model_name
+            } else {
+                d.model_name
+            },
             model_path: path,
             image,
             tensor_parallel: d.gpu_uuids.len().max(1),
@@ -316,6 +322,15 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
         }
         "deployments" => {
             let d: Deployment = decode(v.clone())?;
+            if !d.model_name.is_empty()
+                && (d.model_name.len() > 128
+                    || !d
+                        .model_name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_-./".contains(&b)))
+            {
+                return Err("服务模型名格式无效".into());
+            }
             if d.port < 1024 || d.gpu_uuids.len() > 16 {
                 return Err("端口或 GPU 数量无效".into());
             }

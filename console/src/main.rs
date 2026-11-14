@@ -1,6 +1,7 @@
 mod access;
 mod admin;
 mod artifacts;
+mod backup;
 mod catalog;
 mod catalog_api;
 use catalog_api::{
@@ -114,6 +115,10 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route(
+            "/deployments/{id}/comparison",
+            get(catalog_api::deployment_comparison),
+        )
         .route(
             "/workspaces/{id}/requests",
             get(catalog_api::workspace_requests),
@@ -333,7 +338,7 @@ async fn action(
         .await;
         let (status, detail) = match result {
             Ok(()) => {
-                if action == "gateway_start" {
+                if action == "gateway_start" || action == "gateway_apply" {
                     let _ = a.store.set_setting("active_gateway", &context);
                 }
                 if action == "gateway_stop" {
@@ -395,6 +400,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         return environment::prepare_host().await.map_err(Into::into);
     }
     let data = PathBuf::from(std::env::var("PHYXI_STATE_DIR").unwrap_or(".phyxi-console".into()));
+    if std::env::args().nth(1).as_deref() == Some("--restore") {
+        use std::io::Read;
+        let input = std::env::args().nth(2).ok_or("需要备份文件路径")?;
+        if !data.is_absolute() {
+            return Err("恢复需要绝对状态目录路径".into());
+        }
+        let data = fs::canonicalize(data.parent().ok_or("恢复路径无父目录")?)?
+            .join(data.file_name().ok_or("恢复路径必须包含目录名")?);
+        let mut password = zeroize::Zeroizing::new(String::new());
+        std::io::stdin().take(1024).read_to_string(&mut password)?;
+        backup::restore(
+            std::path::Path::new(&input),
+            &data,
+            password.trim_end_matches(['\r', '\n']),
+        )?;
+        println!("恢复完成；会话未恢复，请检查资源和路径后再启动。");
+        return Ok(());
+    }
+
     fs::create_dir_all(&data)?;
     #[cfg(unix)]
     {
@@ -415,6 +439,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         std::io::stdin().take(1024).read_to_string(&mut password)?;
         admin::set_password(&data, password.trim_end_matches(['\r', '\n']))?;
         println!("管理员密码已设置；重启控制台后旧会话失效。");
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("--backup") {
+        use std::io::Read;
+        let output = std::env::args().nth(2).ok_or("需要备份输出路径")?;
+        let mut password = zeroize::Zeroizing::new(String::new());
+        std::io::stdin().take(1024).read_to_string(&mut password)?;
+        backup::create(
+            &data,
+            std::path::Path::new(&output),
+            password.trim_end_matches(['\r', '\n']),
+        )?;
+        println!("加密备份完成（不含权重与登录会话）。");
         return Ok(());
     }
     let host = std::env::var("PHYXI_DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());

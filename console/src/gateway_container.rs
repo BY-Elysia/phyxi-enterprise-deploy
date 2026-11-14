@@ -122,7 +122,7 @@ pub async fn apply(g: &Gateway, text: &str) -> Result<(), String> {
     atomic(&path, text.as_bytes())?;
     // Bind-mounted files on desktop VMs can briefly expose old attributes after rename.
     let mut validation = nginx(g, &["-t"]).await;
-    for _ in 0..4 {
+    for _ in 0..20 {
         if validation.is_ok() {
             break;
         }
@@ -290,6 +290,21 @@ mod docker_tests {
         assert!(apply(&recovered, "invalid nginx syntax").await.is_err());
         assert_eq!(fs::read(recovered.dir.join("nginx.conf")).unwrap(), prior);
         assert_eq!(observed().await.unwrap(), generation);
+        let mut invalid = config.clone();
+        invalid.tls_mode = "enterprise".into();
+        invalid.cert_file = root.join("missing-certificate.pem").display().to_string();
+        assert!(recovered.apply_config(&invalid, &model).await.is_err());
+        assert_eq!(fs::read(recovered.dir.join("nginx.conf")).unwrap(), prior);
+        assert_eq!(observed().await.unwrap(), generation);
+        recovered.apply_config(&config, &model).await.unwrap();
+        recovered.matches(&config, &model).await.unwrap();
+        let applied: Active =
+            serde_json::from_slice(&fs::read(recovered.dir.join("active-container.json")).unwrap())
+                .unwrap();
+        assert_ne!(applied.generation, generation);
+        assert!(fs::read_to_string(recovered.dir.join("nginx.conf"))
+            .unwrap()
+            .contains("/tls-"));
         let foreign_root = root.join("foreign");
         let foreign = Gateway::new(&foreign_root);
         assert!(check(&foreign).await.is_err());

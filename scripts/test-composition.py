@@ -53,6 +53,8 @@ def main():
    params['max_model_len']=1024;put('runtimes','r',params,1);put('runtimes','r',params,1,400)
    old=next(j for j in call('/jobs') if j['id']==started['id']);assert old['config']['max_model_len']==512
    assert call('/deployments/a/preview')['config']['max_model_len']==1024
+   diff=call('/deployments/a/comparison');assert diff['running']['max_model_len']==512 and diff['draft']['max_model_len']==1024
+   assert any(c['field']=='max_model_len' for c in diff['changes'])
    put('gateways','g',{'deployment':'a','config':g},1)
    client=call('/workspaces/w/export');assert client['model']=='composition-test' and 'env:PHYXI_API_KEY' in json.dumps(client) and token not in json.dumps(client)
    call('/catalog/gateways/g','DELETE',expected=400)
@@ -62,6 +64,9 @@ def main():
     assert call('/reports')['releases'][0]['composition']==published['composition']
     call('/actions/certificate?kind=gateways&id=g','POST',expected=400)
     task('gateway_stop','gateways','g')
+   dep['model_name']='renamed-service';put('deployments','a',dep,1)
+   redeployed=task('redeploy','deployments','a');assert redeployed['config']['max_model_len']==1024 and redeployed['config']['model_name']=='renamed-service'
+   diff=call('/deployments/a/comparison');assert diff['running']['model_name']=='renamed-service' and not diff['changes']
    task('stop','deployments','a') # Edited shared profiles do not prevent stopping the active instance.
    call('/catalog/workspaces/w','DELETE');call('/catalog/gateways/g','DELETE');call('/catalog/deployments/a','DELETE');call('/catalog/deployments/b','DELETE');call('/catalog/models/m','DELETE')
    proc.terminate();proc.wait(timeout=10)

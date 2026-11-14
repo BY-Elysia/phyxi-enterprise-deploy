@@ -14,10 +14,12 @@ pub const ACTIONS: &[&str] = &[
     "download",
     "pull_image",
     "start",
+    "redeploy",
     "stop",
     "prepare",
     "certificate",
     "gateway_start",
+    "gateway_apply",
     "gateway_stop",
     "verify",
     "publish",
@@ -94,6 +96,46 @@ pub async fn run(
             execute(cmd, Some((store, id.into())), 1800).await?;
             Ok(())
         }
+        "redeploy" => {
+            let previous = active_config(runtime, &store).await?;
+            let mut snapshot = store.setting("active_gateway")?;
+            let gateway_config = if gateway.running().await? {
+                let profile: crate::catalog::Gateway =
+                    serde_json::from_value(snapshot["data"].clone())
+                        .map_err(|_| "缺少运行网关快照，拒绝自动停用")?;
+                let mut config = profile.config;
+                if crate::access::configured() {
+                    config.workspace_scope = snapshot["id"].as_str().ok_or("缺少网关归属")?.into();
+                }
+                gateway.matches(&config, &previous).await?;
+                Some(config)
+            } else {
+                None
+            };
+            store.set_setting(
+                &format!("redeploy_previous:{id}"),
+                &json!({"model":previous,"gateway":snapshot}),
+            )?;
+            if gateway_config.is_some() {
+                gateway.stop().await?;
+                store.set_setting("active_gateway", &Value::Null)?;
+            }
+            runtime
+                .job("stop", &previous, id, store.clone(), cancel.clone())
+                .await?;
+            store.event(
+                id,
+                "旧实例已停止；开始按冻结快照重新部署，失败时不会假称旧实例仍可用",
+            )?;
+            runtime.job("start", c, id, store.clone(), cancel).await?;
+            if let Some(config) = gateway_config {
+                gateway.start(&config, c).await?;
+                snapshot["dependencies"]["deployment"] =
+                    store.setting(&format!("composition:{id}"))?;
+                store.set_setting("active_gateway", &snapshot)?;
+            }
+            Ok(())
+        }
         "certificate" => {
             if gateway.running().await? {
                 return Err("请先停止网关，再更换证书".into());
@@ -105,6 +147,11 @@ pub async fn run(
             let active = active_config(runtime, &store).await?;
             gateway.start(g, &active).await?;
             store.event(id, "网关启动，下一步执行接口验收")
+        }
+        "gateway_apply" => {
+            let active = active_config(runtime, &store).await?;
+            gateway.apply_config(g, &active).await?;
+            store.event(id, "网关配置与证书已校验并在线应用，已有连接允许完成")
         }
         "gateway_stop" => gateway.stop().await,
         "verify" | "publish" => {

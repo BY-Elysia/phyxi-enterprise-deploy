@@ -66,6 +66,7 @@ ThreadingHTTPServer(('0.0.0.0',8000),H).serve_forever()
         skew=valid_at-time.time()
         if skew>10:raise RuntimeError('Docker clock differs by over 10 seconds; synchronize host clocks')
         if skew>0:time.sleep(skew+.2)
+        task('gateway_apply')
         route='/workspaces/workspace-a/credential'
         assert api(route,{'operation':'apply'})[0]==200
         code,r=api(route,{'operation':'rotate'});assert code==200;key=r['key']

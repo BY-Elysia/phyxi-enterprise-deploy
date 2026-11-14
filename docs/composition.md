@@ -7,7 +7,7 @@
 | models | 服务模型名、服务器路径、可选固定版本下载来源 | 无 |
 | images | 引擎类型、Docker 标签或摘要地址；执行时固定本地镜像 ID | 无 |
 | runtimes | vLLM/SGLang/CPU 后端、上下文、并发、显存比例、解析器、验收能力 | 无 |
-| deployments | 名称、GPU UUID、端口 | model、image、runtime |
+| deployments | 名称、服务模型名、GPU UUID、端口 | model、image、runtime |
 | gateways | 域名、网段、TLS/CA、监听地址 | deployment |
 | workspaces | 客户端凭据环境变量名 | gateway |
 
@@ -19,13 +19,13 @@
 
 启动时解析引用并保存所有依赖的名称、ID、修订号和内容。运行时读取任务快照，不读取后来修改的配置库。停止根据实例启动任务判断归属，不会因同名或相同配置而误停别的部署。停止模型前需停止网关。
 
-模型验收比较选定组合与真实运行配置，草稿偏离时拒绝验收。网关启动绑定选定部署的已运行实例；网关验收、发布使用真实模型快照及选定网关配置。修改网关草稿后需要停止、重新准备证书并启动，才可重新发布。模型换版仍需停机窗口；没有自动切流。
+模型验收比较选定组合与真实运行配置，草稿偏离时拒绝验收。网关启动绑定选定部署的已运行实例；网关验收、发布使用真实模型快照及选定网关配置。独立容器模式可在线应用网关草稿，原生模式仍需停止后重新启动，之后重新验收发布。模型换版仍需停机窗口；没有自动切流。
 
-网关配置与工作区模板可独立修改，但不自动变更运行服务。工作区导出使用当前引用的配置草稿，明确标记为模板；正式发布材料由网关验收成功后生成。客户端环境变量需要设置为该服务器 `gateway/client.token` 中的凭据，并安装可信 CA；此版本只支持单个活动网关及其共享令牌，不宣称每工作区独立鉴权或凭据隔离。
+网关配置与工作区模板可独立修改，但不自动变更运行服务。工作区导出使用当前引用的配置草稿，明确标记为模板；正式发布材料由网关验收成功后生成。企业模式客户端使用所属工作区新生成的 API Key，并安装可信 CA；一个工作区一个有效密钥，可独立重置、撤销和停用。旧原生测试模式使用共享令牌，仅限兼容验证。
 
 ## HTTP API
 
-以下接口均使用控制台 Bearer Token，浏览器不持有 root 权限。
+企业模式使用管理员会话 Cookie，写操作另需 CSRF；仅本地兼容模式接受控制台 Bearer Token。浏览器不直接接触 Docker socket。
 
 - `GET /api/presets`：只返回运行环境、模型仓库及下载站点预设，不下载资源。
 - `GET /api/models/{id}/status`：检查本地权重与下载清单是否完整。
@@ -38,8 +38,8 @@
 - `POST /api/actions/{action}?kind={kind}&id={id}`：作用于明确对象的操作。
   - models：download
   - images：pull_image
-  - deployments：start、stop、verify
-  - gateways：certificate、gateway_start、gateway_stop、verify、publish
+  - deployments：start、redeploy、stop、verify
+  - gateways：certificate、gateway_start、gateway_apply、gateway_stop、verify、publish
 - `GET /api/jobs`：返回操作记录与完整 composition 快照。
 - `GET /api/jobs/{id}/events?tail=true`：最近 200 条；原 `after` 游标仍可使用。
 
@@ -62,3 +62,15 @@ python3 scripts/test-composition.py \
 `models.source` 包含 repo、revision、endpoint、可选 file。支持官方/HF 镜像站仓库 URL 或 owner/name；main/tag 保存时解析为固定 commit，endpoint 限定官方与 hf-mirror。目录来源需下载清单与实际文件一致，自行准备的本地目录至少检查 config.json 和非空权重文件；完整可加载性由推理引擎判断。
 
 images.engine 与 runtimes.engine 必须一致。GPU 部署读取已存在的本地镜像 ID，以 `--pull never` 和离线模型环境变量启动；缺少资源时要求用户先执行 download / pull_image，不隐式下载。预设与自定义地址使用相同准备流程。验证：`python3 scripts/test-presets.py`。
+
+## 企业接口与应用语义
+
+- `GET /api/deployments/{id}/comparison`：草稿、实际运行快照、字段差异及准备错误；不会应用配置。
+- `POST /api/actions/redeploy?kind=deployments&id=…`：停止所属模型及关联网关，以冻结组合重新启动；保留旧快照，无自动回滚。
+- `POST /api/gateways/{id}/certificate`：revision、certificate、private_key、ca；校验证书后保存草稿，不立即生效。
+- `POST /api/actions/gateway_apply?kind=gateways&id=…`：独立 Nginx 业务网关在线应用；先验证证书与配置，再重载并确认摘要。
+- `GET/POST /api/workspaces/{id}/credential`：查询状态 / apply、rotate、revoke、disable、enable；只在 rotate 成功响应返回明文密钥。
+- `GET /api/workspaces/{id}/requests`：该工作区最近请求元数据，不含推理正文。
+- `GET /api/audit`：管理操作记录；共享账号不能区分具体个人。
+
+服务模型名由部署指定，留空时继承旧模型记录中的 model_name，保持存量配置兼容。企业容器内固定模型端口 8000，不发布宿主机端口。备份恢复使用离线 CLI，详见 Docker 运维说明。

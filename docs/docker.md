@@ -1,5 +1,7 @@
 # Docker 启动控制台
 
+本文先说明回环兼容开发模式，企业部署请直接使用后文“企业四容器模式”。两种 Compose 不混用。
+
 ## 本地启动与更新
 
 在仓库根目录执行：
@@ -51,13 +53,13 @@ docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
 
 ## P2a：管理员密码初始化
 
-密码登录模块就绪，但正式内网 HTTPS 入口仍需后续网络阶段；不要把本地兼容接口直接发布到内网。
+企业模式已提供 HTTPS 管理入口；不要把本地兼容接口直接发布到内网。
 
 先停止控制台，对同一状态目录执行 `scripts/set-admin-password.py --data-dir /absolute/state/path --binary /absolute/path/phyxi-console`。脚本用隐藏输入读取密码，经 stdin 传入，不放入命令参数。容器部署可在停止 console 后使用 `docker compose run --rm -T console --set-admin` 从安全的 stdin 输入密码（不把明文写进命令或提交文件）。必须使用 Linux 容器二进制或当前主机兼容的二进制。密码至少 12 字节；admin.hash 仅存 Argon2id 哈希。服务锁防止运行中重置；重启使内存会话失效。
 
 存在 admin.hash 时前端自动切换为管理员密码登录，旧 Bearer Token 被拒绝。正式会话 Cookie 强制 Secure、HttpOnly、SameSite=Strict，有效期 8 小时；写操作需要 CSRF token。开发回环 HTTP 调试可显式设置 `PHYXI_LOCAL_HTTP_LOGIN=1`，仅限本地环境，不能作为企业 HTTPS 的替代。登录限速为全管理员入口每分钟 5 次、最多 32 个有效会话；无多账号或 SSO。
 
-网关对象增加“上传企业证书”：三个 PEM 文件各最多 64 KiB，校验通过后保存为草稿，私钥仅保存在权限受限目录。应用证书仍走显式准备/启动流程，不自动改变运行网关。管理员审计在“操作记录”展开查看，最多保存 5000 条、返回最新 200 条，仅记录账号/动作/状态/时间，来源地址将在可信网关接入阶段补齐。
+网关对象增加“上传企业证书”：三个 PEM 文件各最多 64 KiB，校验通过后保存为草稿，私钥仅保存在权限受限目录。保存不自动改变运行网关；独立容器模式可点击“在线应用网关配置”，原生测试使用准备/启动流程。管理员审计在“操作记录”展开查看，最多保存 5000 条、返回最新 200 条，记录账号/动作/状态/时间，以及企业网关覆盖的可信来源 IP。
 
 ## P1b/P3：企业四容器模式
 
@@ -72,3 +74,33 @@ docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
 网关请求日志为结构化元数据，写入 Docker 日志（10 MiB × 3 上限），管理页按工作区过滤最近 200 行；不提供长期日志平台。管理审计从可信网关覆盖的来源头读取规范 IP，不信任请求体中的来源信息。控制台、鉴权服务互不共写数据库。独立网关不挂载 Docker socket，模型和鉴权也不挂载。
 
 联调脚本：`python3 scripts/test-access-service.py` 与 `python3 scripts/test-enterprise-containers.py`。后者使用真实四个容器，但模型端是 Python 协议 fixture；它只证明接入、撤销、流式连接、故障和重启边界，不代表 vLLM/SGLang GPU 推理成功。运行时禁止已有同名企业部署或模型容器；结束只清理该脚本创建的部署。
+
+## 重新部署与证书维护
+
+在部署实例选择权重、运行环境、推理参数、服务模型名和 GPU UUID，点击“检查部署 / 查看差异”。运行卡片只显示实际快照；保存草稿不会改变实例。“重新部署”确认后停止原关联网关和所属模型，以新快照启动，再恢复关联网关。失败时查看任务阶段，修正或重新选择旧配置后部署；第一版没有自动回滚。变更后重新执行接口验收。
+
+业务证书在网关页上传并校验，保存后点击“在线应用网关配置”。候选证书存独立目录，Nginx 配置先检查后重载并确认实际摘要；校验失败保留原运行入口。成功版本的证书目录暂不自动清理，避免误删仍被旧连接引用的材料。管理入口证书 admin.pem/admin.key/admin-ca.pem 不由该按钮修改，需要在维护窗口由运维验证并更新后重启 gateway。
+
+## 手动加密备份与恢复
+
+使用与服务器平台匹配的独立 PhyXi 二进制和 `scripts/backup-console.py`。口令隐藏输入，经 stdin 传入，不写到 argv 或项目文件。备份口令至少 12 字节，须独立保管；丢失无法恢复。格式使用 Argon2id 派生密钥和 XChaCha20-Poly1305 认证加密。
+
+1. 保存企业 Compose 环境文件（包含路径和监听地址，不含登录密码），确认原状态目录绝对路径。停止 console 与 access，避免数据库并发修改。此时新的业务请求会失败，已有推理流可结束；安排维护窗口。
+2. 执行下列备份命令。CLI 同时检查控制台和鉴权数据库锁，以 SQLite backup API 创建一致性副本。成功后重新启动 access、console；不需要重新部署模型。
+3. 恢复前先从平台停止所属模型和业务网关，再停止整套企业 Compose；只处理本项目的容器。移走原状态目录保留为回退副本，恢复目标必须不存在，且必须是备份中的原绝对路径。
+4. 执行恢复命令。错误口令、篡改、非白名单文件、路径不符或已有目标目录均拒绝，不覆盖原数据。
+5. 恢复不包含权重、登录会话、请求日志和正在执行的进程；重新准备原路径权重。沿用保存的 Compose 环境文件启动基础服务，重新登录并检查资源，显式部署模型、启动业务网关并验收。
+
+```bash
+# 先通过企业 Compose 停止 console 和 access
+python3 scripts/backup-console.py backup \
+  --data-dir /srv/phyxi/data --file /srv/phyxi-backups/config.phyxi \
+  --binary /opt/phyxi-console/phyxi-console
+
+# 已停止所属模型与整套服务，移走旧 data 目录，恢复原路径
+python3 scripts/backup-console.py restore \
+  --data-dir /srv/phyxi/data --file /srv/phyxi-backups/config.phyxi \
+  --binary /opt/phyxi-console/phyxi-console
+```
+
+备份最大 64 MiB，包含控制台与鉴权数据库、密码哈希、工作区密钥摘要、证书和内部服务凭据。恢复保留历史快照，但清除活动网关标记，Nginx 回到仅管理入口的初始配置，避免使用备份时的业务路由或不存在的证书版本。恢复工作区密钥状态也会回到备份时间点：恢复后在重新开放业务前检查并撤销备份之后已作废的密钥，必要时全部重置。第一版不支持跨路径自动迁移、在线恢复或备份权重。

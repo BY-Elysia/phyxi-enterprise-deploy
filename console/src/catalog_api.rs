@@ -92,7 +92,10 @@ pub(crate) async fn workspace_export(
     let w: catalog::Workspace = cat.data("workspaces", &id)?;
     let g: catalog::Gateway = cat.data("gateways", &w.gateway)?;
     let d: catalog::Deployment = cat.data("deployments", &g.deployment)?;
-    let m: catalog::Model = cat.data("models", &d.model)?;
+    let mut m: catalog::Model = cat.data("models", &d.model)?;
+    if !d.model_name.is_empty() {
+        m.model_name = d.model_name;
+    }
     // Export a client template, never the server token or a private key.
     Ok(Json(
         json!({"workspace":cat.get("workspaces",&id)?.name,"base_url":format!("https://{}:{}/v1",g.config.domain,g.config.port),"model":m.model_name,"credential_env":w.credential_env,"ca_file":g.config.ca_file,"note":"客户端需自行设置凭据环境变量并安装信任证书；这是配置模板，不代表服务已经发布。","opencode":{"provider":{"phyxi":{"npm":"@ai-sdk/openai-compatible","name":"PhyXi","options":{"baseURL":format!("https://{}:{}/v1",g.config.domain,g.config.port),"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name}}}}},"composition":cat.snapshot("workspaces",&id)?}),
@@ -152,13 +155,16 @@ pub(crate) async fn resolve_action(
                 ..Config::default()
             }
         }
-        ("deployments", "start" | "verify") => {
+        ("deployments", "start" | "redeploy" | "verify") => {
             let c = prepared_config(a, &cat, id).await?;
             if std::env::var("PHYXI_MODEL_NETWORK").is_ok() && c.engine == config::Engine::LlamaCpu
             {
                 return Err("CPU 后端仅供原生本地测试；企业容器模式请选择 GPU 推理引擎"
                     .to_string()
                     .into());
+            }
+            if action == "redeploy" {
+                assert_deployment(a, id).await?;
             }
             if action == "verify" {
                 assert_deployment(a, id).await?;
@@ -168,7 +174,7 @@ pub(crate) async fn resolve_action(
                         .into());
                 }
             }
-            if action == "start"
+            if ["start", "redeploy"].contains(&action)
                 && c.port
                     == std::env::var("PHYXI_PORT")
                         .unwrap_or("8765".into())
@@ -185,7 +191,11 @@ pub(crate) async fn resolve_action(
             a.store
                 .job_config(st["job"].as_str().ok_or("缺少部署快照".to_string())?)?
         }
-        ("gateways", "certificate" | "gateway_start" | "gateway_stop" | "verify" | "publish") => {
+        (
+            "gateways",
+            "certificate" | "gateway_start" | "gateway_apply" | "gateway_stop" | "verify"
+            | "publish",
+        ) => {
             let profile: catalog::Gateway = cat.data(kind, id)?;
             g = profile.config;
             if access::configured() {
@@ -416,5 +426,42 @@ pub(crate) async fn workspace_requests(
     catalog::Catalog::load(&a.store)?.get("workspaces", &id)?;
     Ok(Json(
         crate::gateway_container::requests(&a.gateway, &id).await?,
+    ))
+}
+
+pub(crate) async fn deployment_comparison(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let cat = catalog::Catalog::load(&a.store)?;
+    cat.get("deployments", &id)?;
+    let status = a.runtime.status().await?;
+    let mut active = Value::Null;
+    if let Some(job) = status["job"].as_str() {
+        if a.store.setting(&format!("composition:{job}"))?["id"] == id {
+            active = serde_json::to_value(a.store.job_config(job)?).map_err(|e| e.to_string())?;
+        }
+    }
+    let mut problem = None;
+    let draft = match prepared_config(&a, &cat, &id).await {
+        Ok(c) => serde_json::to_value(c).map_err(|e| e.to_string())?,
+        Err(e) => {
+            problem = Some(e.1);
+            cat.compose_draft(&id, &a.runtime.data)
+                .ok()
+                .and_then(|c| serde_json::to_value(c).ok())
+                .unwrap_or(Value::Null)
+        }
+    };
+    let changes = if let (Some(current), Some(next)) = (active.as_object(), draft.as_object()) {
+        next.iter()
+            .filter(|(k, v)| current.get(*k) != Some(*v))
+            .map(|(k, v)| json!({"field":k,"running":current.get(k),"draft":v}))
+            .collect::<Vec<_>>()
+    } else {
+        vec![]
+    };
+    Ok(Json(
+        json!({"draft":draft,"running":active,"changes":changes,"preparation_error":problem,"runtime_state":status["state"],"composition":cat.snapshot("deployments",&id)?}),
     ))
 }
