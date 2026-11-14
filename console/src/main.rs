@@ -17,6 +17,7 @@ mod gateway_container;
 mod host_metrics;
 mod host_setup;
 mod image_sources;
+mod job_control;
 mod presets;
 mod process;
 mod pull_terminal;
@@ -44,13 +45,10 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
 };
 use store::Store;
-use tokio::sync::Semaphore;
+use tokio::sync::RwLock;
 
 #[derive(Clone)]
 struct App {
@@ -59,8 +57,8 @@ struct App {
     gateway: gateway::Gateway,
     token: String,
     admin: Option<Arc<admin::Admin>>,
-    gate: Arc<Semaphore>,
-    cancel: Arc<AtomicBool>,
+    gate: Arc<RwLock<()>>,
+    jobs: Arc<job_control::Jobs>,
 }
 struct Error(StatusCode, String);
 impl From<String> for Error {
@@ -130,7 +128,7 @@ fn router(app: App) -> Router {
             })
             .put(
                 |State(a): State<App>, Json(value): Json<image_sources::Sources>| async move {
-                    let _permit = a.gate.clone().try_acquire_owned().map_err(|_| {
+                    let _permit = a.gate.clone().try_write_owned().map_err(|_| {
                         Error(
                             StatusCode::CONFLICT,
                             "任务执行中，请稍后修改镜像来源".into(),
@@ -367,41 +365,72 @@ async fn action(
     Query(scope): Query<Scope>,
 ) -> Result<(StatusCode, Json<Value>)> {
     if action == "cancel" {
-        if a.store.jobs()?.iter().any(|j| {
-            j.status == "running" && ["prepare", "repair_toolkit"].contains(&j.action.as_str())
-        }) {
-            return Err(Error(
-                StatusCode::CONFLICT,
-                "宿主机安装或修复中，不能强制取消包管理器；请等待任务完成或检查执行器日志。".into(),
-            ));
-        }
-        if a.gate.available_permits() != 0 {
-            return Err(Error(StatusCode::CONFLICT, "没有运行中的任务".into()));
-        }
-        a.cancel.store(true, Ordering::SeqCst);
-        return Ok((StatusCode::ACCEPTED, Json(json!({"cancelling":true}))));
+        let id = a
+            .jobs
+            .cancel(scope.job_id.as_deref())
+            .map_err(|e| Error(StatusCode::CONFLICT, e))?;
+        return Ok((
+            StatusCode::ACCEPTED,
+            Json(json!({"cancelling":true,"id":id})),
+        ));
     }
+
     if !tasks::ACTIONS.contains(&action.as_str()) {
         return Err(Error(StatusCode::NOT_FOUND, "未知操作".into()));
     }
-    let permit = a.gate.clone().try_acquire_owned().map_err(|_| {
-        Error(
-            StatusCode::CONFLICT,
-            "已有任务运行，请等待或申请取消".into(),
-        )
-    })?;
+    // Transfers share the configuration read lock; lifecycle/host mutations require exclusivity.
+    let parallel = ["download", "pull_image", "services_start"].contains(&action.as_str());
+    let conflict = || Error(StatusCode::CONFLICT, "存在冲突任务，请等待完成".into());
+    let read = if parallel {
+        Some(a.gate.clone().try_read_owned().map_err(|_| conflict())?)
+    } else {
+        None
+    };
+    let write = if parallel {
+        None
+    } else {
+        Some(a.gate.clone().try_write_owned().map_err(|_| conflict())?)
+    };
     let (c, gateway_config, context) = resolve_action(&a, &action, &scope).await?;
     if action == "start" {
         c.validate()?;
     }
     let id = uuid::Uuid::new_v4().to_string();
+    let sources = image_sources::load(&a.runtime.data)?;
+    let resources = match action.as_str() {
+        "pull_image" => vec![format!("image:{}", sources.resolve(&c.image)?)],
+        "download" => {
+            let path = if let Some(mut source) = c.source.clone() {
+                source.file.clear();
+                artifacts::destination(&a.runtime.data, &source)
+                    .display()
+                    .to_string()
+            } else {
+                c.model_path.clone()
+            };
+            vec![format!("weights:{path}")]
+        }
+        "services_start" => vec![
+            "gateway".into(),
+            format!("image:{}", sources.resolve(&sources.gateway_image)?),
+        ],
+        _ => vec!["control".into()],
+    };
+    let lease = a
+        .jobs
+        .reserve(
+            &id,
+            resources,
+            !["prepare", "repair_toolkit"].contains(&action.as_str()),
+        )
+        .map_err(|e| Error(StatusCode::CONFLICT, e))?;
     a.store
         .set_setting(&format!("composition:{id}"), &context)?;
     a.store.create(&id, &action, &c)?;
-    a.cancel.store(false, Ordering::SeqCst);
     let response = json!({"id":id});
     tokio::spawn(async move {
-        let _permit = permit;
+        let (_read, _write) = (read, write);
+        let _lease = lease;
         let result = tasks::run(
             &a.runtime,
             &a.gateway,
@@ -409,7 +438,7 @@ async fn action(
             (&c, &gateway_config),
             &id,
             a.store.clone(),
-            a.cancel.clone(),
+            _lease.cancel.clone(),
         )
         .await;
         let (status, detail) = match result {
@@ -557,8 +586,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         } else {
             admin::Admin::load(&data)?
         },
-        gate: Arc::new(Semaphore::new(1)),
-        cancel: Arc::new(AtomicBool::new(false)),
+        gate: Arc::new(RwLock::new(())),
+        jobs: Arc::new(job_control::Jobs::default()),
     };
     if !executor::proxy() {
         catalog::migrate(&app.store)?;
@@ -604,8 +633,8 @@ mod tests {
             ),
             token: "test-token".into(),
             admin: None,
-            gate: Arc::new(Semaphore::new(1)),
-            cancel: Arc::new(AtomicBool::new(false)),
+            gate: Arc::new(RwLock::new(())),
+            jobs: Arc::new(job_control::Jobs::default()),
         }
     }
     #[tokio::test]
@@ -642,7 +671,7 @@ mod tests {
     #[tokio::test]
     async fn serializes_actions() {
         let a = app();
-        let permit = a.gate.clone().acquire_owned().await.unwrap();
+        let permit = a.gate.clone().write_owned().await;
         let q = Request::builder()
             .method("POST")
             .uri("/api/actions/stop")

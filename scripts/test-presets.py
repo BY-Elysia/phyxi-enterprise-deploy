@@ -66,6 +66,25 @@ def main():
    assert 'sglang.launch_server' in runs[1] and '--mem-fraction-static' in runs[1] and '--max-model-len' not in runs[1]
    assert all(cmd[cmd.index('--pull')+1]=='never' and 'HF_HUB_OFFLINE=1' in cmd for cmd in runs)
    assert len([cmd for cmd in commands() if cmd[0]=='pull'])==1,'only explicit preparation may pull'
+   # Separate downloads overlap; duplicate resources and unsafe lifecycle mutations do not.
+   for key in ['a','b','c','d']:
+    put('images','parallel-'+key,{'engine':'vllm','reference':'registry.example/'+key+':test'})
+   slow=smoke.FAKE.replace("if p.with_suffix('.slow').exists():time.sleep(.6)","if p.with_suffix('.slow').exists():time.sleep(4)")
+   (bins/'docker').write_text(slow);(d/'container.slow').touch()
+   ids=[call('/actions/pull_image?kind=images&id=parallel-'+key,'POST',status=202)['id'] for key in ['a','b','c']]
+   call('/actions/pull_image?kind=images&id=parallel-a','POST',status=409)
+   call('/actions/pull_image?kind=images&id=parallel-d','POST',status=409)
+   call('/actions/stop','POST',status=409)
+   call('/actions/cancel','POST',status=409)
+   call('/actions/cancel?job_id=missing','POST',status=409)
+   call('/actions/cancel?job_id='+ids[0],'POST',status=202)
+   for _ in range(200):
+    results={j['id']:j['status'] for j in call('/jobs')}
+    if all(results[k]!='running' for k in ids):break
+    time.sleep(.05)
+   assert [results[k] for k in ids]==['cancelled','succeeded','succeeded'],results
+   (d/'container.slow').unlink();task('pull_image','images','parallel-a')
+   print('PASS: three parallel downloads, duplicate/capacity/lifecycle exclusion, targeted cancellation, unaffected peers and retry')
    print('PASS: backend presets, custom source metadata pinning without downloads, missing readiness, explicit pull, immutable image ID, engine mismatch and SGLang startup contract')
   finally:proc.terminate();proc.wait(timeout=10)
 if __name__=='__main__':main()

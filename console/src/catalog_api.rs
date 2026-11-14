@@ -4,6 +4,7 @@ use super::*;
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Scope {
+    pub(crate) job_id: Option<String>,
     kind: Option<String>,
     id: Option<String>,
 }
@@ -20,7 +21,7 @@ pub(crate) async fn catalog_put(
     let _permit = a
         .gate
         .clone()
-        .try_acquire_owned()
+        .try_write_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后修改配置".into()))?;
     if kind == "workspaces" && id.starts_with("system-") {
         return Err("system- 前缀用于系统内部工作区".to_string().into());
@@ -49,7 +50,7 @@ pub(crate) async fn catalog_delete(
     let _permit = a
         .gate
         .clone()
-        .try_acquire_owned()
+        .try_write_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中，请稍后删除配置".into()))?;
     if kind == "workspaces" && access::configured() {
         return Err("工作区请停用并撤销密钥，保留审计记录；不直接删除"
@@ -300,7 +301,7 @@ pub(crate) async fn certificate_upload(
     let _permit = a
         .gate
         .clone()
-        .try_acquire_owned()
+        .try_write_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中".into()))?;
     let mut cat = catalog::Catalog::load(&a.store)?;
     let mut record = cat.get("gateways", &id)?.clone();
@@ -395,7 +396,7 @@ pub(crate) async fn credential_change(
     let _permit = a
         .gate
         .clone()
-        .try_acquire_owned()
+        .try_write_owned()
         .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中".into()))?;
     let cat = catalog::Catalog::load(&a.store)?;
     let workspace: catalog::Workspace = cat.data("workspaces", &id)?;
