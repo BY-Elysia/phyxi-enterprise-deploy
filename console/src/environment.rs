@@ -122,15 +122,16 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
             }
         }
     }
-    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"containerized":Path::new("/.dockerenv").exists(),"metrics":metrics,"gpus":gpus,"vllm":vllm,"engine_name":engine_name,"host_setup_enabled":std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref()==Ok("1"),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
+    serde_json::json!({"checks":checks,"platform":std::env::consts::OS,"containerized":Path::new("/.dockerenv").exists(),"metrics":metrics,"gpus":gpus,"vllm":vllm,"engine_name":engine_name,"executor":crate::executor::enabled(),"host_setup_enabled":crate::executor::enabled(),"plan":plan(),"notes":"安装仅支持 Ubuntu 22.04/24.04 专用服务器；保留已有驱动/CUDA，不格式化磁盘。现有任务运行时拒绝修改容器环境。"})
 }
 pub fn plan() -> Vec<&'static str> {
     vec![
-        "检查 Ubuntu、管理员权限、驱动、GPU/容器无运行任务",
-        "准备官方签名 APT 源；保留现有配置",
-        "安装缺失的 Docker、NVIDIA Container Toolkit、Nginx、OpenSSL",
-        "配置 NVIDIA Docker runtime；必要时重启空闲 Docker",
-        "验证 Docker runtime；输出已安装包版本（不启动模型/网关）",
+        "检查宿主机 Ubuntu、显卡驱动及 Docker；不替换驱动",
+        "仅安装缺失的 NVIDIA Container Toolkit；不安装 Nginx 或推理框架",
+        "配置 NVIDIA Docker runtime；已有配置保持不变",
+        "修改前检查运行容器和 GPU 任务；存在业务负载时拒绝变更",
+        "必要时重启 Docker，控制台可能短暂断开；执行器继续记录任务",
+        "单独执行 GPU 容器验证，不下载镜像、不加载模型",
     ]
 }
 async fn run(program: &str, args: &[&str]) -> Result<String, String> {
@@ -360,7 +361,7 @@ mod tests {
     }
     #[test]
     fn provisioning_is_separate() {
-        assert_eq!(plan().len(), 5);
+        assert!(plan().join(" ").contains("存在业务负载时拒绝变更"));
         assert!(!plan().join(" ").contains("安装驱动"));
     }
 }

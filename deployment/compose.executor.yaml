@@ -1,0 +1,38 @@
+name: phyxi-managed
+services:
+  console:
+    image: ${PHYXI_CONTROL_IMAGE:?Set an immutable image ID}
+    restart: unless-stopped
+    user: "10001:10001"
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    labels:
+      io.phyxi.role: console
+    environment:
+      PHYXI_ROLE: console
+      PHYXI_STATE_DIR: /var/lib/phyxi-console
+      PHYXI_PORT: "8765"
+      PHYXI_REQUIRE_ADMIN: "1"
+      PHYXI_LOCAL_HTTP_LOGIN: "1"
+      PHYXI_EXECUTOR_SOCKET: /run/phyxi/executor.sock
+      PHYXI_EXECUTOR_TOKEN_FILE: /run/phyxi/executor.token
+    volumes:
+      - ${PHYXI_CONSOLE_AUTH_DIR:?Set console auth directory}:/var/lib/phyxi-console
+      - /run/phyxi:/run/phyxi:ro
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8765/login]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

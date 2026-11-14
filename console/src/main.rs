@@ -10,9 +10,11 @@ use catalog_api::{
 };
 mod config;
 mod environment;
+mod executor;
 mod gateway;
 mod gateway_container;
 mod host_metrics;
+mod host_setup;
 mod presets;
 mod process;
 mod runtime;
@@ -163,8 +165,13 @@ fn router(app: App) -> Router {
         .route("/logs", get(logs))
         .route("/jobs", get(jobs))
         .route("/jobs/{id}/events", get(events))
-        .route("/actions/{action}", post(action))
-        .route_layer(middleware::from_fn_with_state(app.clone(), auth));
+        .route("/actions/{action}", post(action));
+    let api = if executor::proxy() {
+        Router::new().fallback(executor::forward)
+    } else {
+        api
+    };
+    let api = api.layer(middleware::from_fn_with_state(app.clone(), auth));
     Router::new()
         .route("/api/auth/info", get(admin::info))
         .route("/api/auth/login", post(admin::login))
@@ -328,6 +335,14 @@ async fn action(
     Query(scope): Query<Scope>,
 ) -> Result<(StatusCode, Json<Value>)> {
     if action == "cancel" {
+        if a.store.jobs()?.iter().any(|j| {
+            j.status == "running" && ["prepare", "repair_toolkit"].contains(&j.action.as_str())
+        }) {
+            return Err(Error(
+                StatusCode::CONFLICT,
+                "宿主机安装或修复中，不能强制取消包管理器；请等待任务完成或检查执行器日志。".into(),
+            ));
+        }
         if a.gate.available_permits() != 0 {
             return Err(Error(StatusCode::CONFLICT, "没有运行中的任务".into()));
         }
@@ -428,6 +443,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--prepare-host") {
         return environment::prepare_host().await.map_err(Into::into);
     }
+    if std::env::args().nth(1).as_deref() == Some("--prepare-toolkit") {
+        return host_setup::prepare(&std::env::args().nth(2).unwrap_or_default())
+            .await
+            .map_err(Into::into);
+    }
     let data = PathBuf::from(std::env::var("PHYXI_STATE_DIR").unwrap_or(".phyxi-console".into()));
     if std::env::args().nth(1).as_deref() == Some("--restore") {
         use std::io::Read;
@@ -500,12 +520,21 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         gateway: gateway::Gateway::new(&data),
         runtime: Runtime::new(private_file(&data.join("owner"))?, host, data.clone()),
         token: private_file(&data.join("token"))?,
-        admin: admin::Admin::load(&data)?,
+        admin: if executor::enabled() {
+            None
+        } else {
+            admin::Admin::load(&data)?
+        },
         gate: Arc::new(Semaphore::new(1)),
         cancel: Arc::new(AtomicBool::new(false)),
     };
-    catalog::migrate(&app.store)?;
-    telemetry::start(app.store.clone(), app.runtime.clone());
+    if !executor::proxy() {
+        catalog::migrate(&app.store)?;
+        telemetry::start(app.store.clone(), app.runtime.clone());
+    }
+    if executor::enabled() {
+        return executor::serve(app).await;
+    }
     let bind: std::net::Ipv4Addr = std::env::var("PHYXI_BIND")
         .unwrap_or("127.0.0.1".into())
         .parse()?;

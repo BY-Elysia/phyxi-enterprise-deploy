@@ -370,6 +370,20 @@ impl Runtime {
             return Ok(());
         }
         c.validate()?;
+        if crate::executor::enabled() {
+            let path = std::fs::canonicalize(&c.model_path).map_err(|_| "模型路径不存在")?;
+            let allowed = [
+                self.data.join("models"),
+                std::path::PathBuf::from("/srv/phyxi/models"),
+            ];
+            if !allowed
+                .iter()
+                .filter_map(|p| std::fs::canonicalize(p).ok())
+                .any(|root| path.starts_with(root))
+            {
+                return Err("执行器只允许使用状态目录 models/ 或 /srv/phyxi/models/ 内的权重；拒绝挂载任意宿主机路径".into());
+            }
+        }
         if self.local.lock().await.is_some() {
             return Err("已有本地模型，请先停止".into());
         }

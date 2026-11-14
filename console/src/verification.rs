@@ -76,14 +76,12 @@ pub async fn request(
             cmd.arg("--header").arg(format!("@{}", auth.display()));
         }
         format!("https://{}:{}{path}", gc.domain, gc.port)
+    } else if std::env::var("PHYXI_MODEL_NETWORK").is_ok()
+        && c.engine != crate::config::Engine::LlamaCpu
+    {
+        format!("http://phyxi-console-model:8000{path}")
     } else {
-        if std::env::var("PHYXI_MODEL_NETWORK").is_ok()
-            && c.engine != crate::config::Engine::LlamaCpu
-        {
-            format!("http://phyxi-console-model:8000{path}")
-        } else {
-            format!("http://127.0.0.1:{}{path}", c.port)
-        }
+        format!("http://127.0.0.1:{}{path}", c.port)
     };
     if let Some(body) = body {
         fs::write(&payload, body.to_string()).map_err(|e| e.to_string())?;

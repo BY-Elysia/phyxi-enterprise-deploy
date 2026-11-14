@@ -1,7 +1,6 @@
 //! One orchestrator, distinct model, host, gateway and acceptance responsibilities.
 use crate::{
     config::Config,
-    environment,
     gateway::{Gateway, GatewayConfig},
     runtime::{execute, Runtime},
     store::Store,
@@ -21,6 +20,8 @@ pub const ACTIONS: &[&str] = &[
     "redeploy",
     "stop",
     "prepare",
+    "repair_toolkit",
+    "verify_gpu",
     "certificate",
     "gateway_start",
     "gateway_apply",
@@ -102,17 +103,22 @@ pub async fn run(
             }
             runtime.job(action, c, id, store, cancel).await
         }
-        "prepare" => {
-            if std::env::var("PHYXI_ENABLE_HOST_SETUP").as_deref() != Ok("1") {
-                return Err("主机安装未启用；请按服务器安装文档配置受控权限".into());
-            }
-            for line in environment::plan() {
-                store.event(id, line)?;
-            }
-            let mut cmd = Command::new("sudo");
-            cmd.args(["-n", "/opt/phyxi-console/phyxi-console", "--prepare-host"]);
+        "verify_gpu" => crate::host_setup::verify(runtime, id, store).await,
+        "prepare" | "repair_toolkit" if crate::executor::enabled() => {
+            let mut cmd = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+            cmd.args([
+                "--prepare-toolkit",
+                if action == "prepare" {
+                    "install"
+                } else {
+                    "repair"
+                },
+            ]);
             execute(cmd, Some((store, id.into())), 1800).await?;
             Ok(())
+        }
+        "prepare" | "repair_toolkit" => {
+            Err("宿主机安装需要连接受控执行器；不会在控制台容器内安装。".into())
         }
         "redeploy" => {
             let previous = active_config(runtime, &store).await?;

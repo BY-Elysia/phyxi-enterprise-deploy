@@ -1,0 +1,28 @@
+[Unit]
+Description=PhyXi local host executor
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=phyxi-console
+UMask=0027
+RuntimeDirectory=phyxi
+RuntimeDirectoryMode=0750
+EnvironmentFile=/etc/phyxi/executor.env
+ExecStart=/opt/phyxi-executor/phyxi-console
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=30
+# The executor needs host package/Docker administration, but no TCP listener.
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

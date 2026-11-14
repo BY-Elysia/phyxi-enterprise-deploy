@@ -16,6 +16,7 @@ jobs:
       - run: cargo build --workspace --locked
       - run: python3 scripts/smoke-console.py
       - run: python3 scripts/test-api-contract.py
+      - run: python3 scripts/test-executor.py
       - name: Check development notes
         env:
           EVENT_NAME: ${{ github.event_name }}

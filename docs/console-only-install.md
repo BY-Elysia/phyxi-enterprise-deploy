@@ -1,3 +1,5 @@
+> 新部署请使用 [控制台与宿主机执行器架构](executor-architecture.md) 和 `scripts/install-executor.py`。下文保留旧版迁移参考，旧版控制台直连 Docker 不再是推荐架构。
+
 # 首次只安装控制台，后续通过页面部署
 
 ## 部署顺序

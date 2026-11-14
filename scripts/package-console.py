@@ -45,6 +45,8 @@ manifest = {'config_id': config_id, 'format': 1, 'revision': a.revision, 'image'
 (a.output/'SHA256SUMS').write_text(digest.hexdigest()+'  console-image.tar.gz\n')
 for name in ['scripts/bootstrap-console.py', 'scripts/console-image.py', 'scripts/fetch-console-release.py',
              'deployment/compose.console-only.yaml', 'deployment/compose.gpu-utility.yaml',
+             'deployment/compose.executor.yaml', 'deployment/phyxi-executor.service',
+             'scripts/install-executor.py', 'docs/executor-architecture.md',
              'docs/console-only-install.md', 'docs/prebuilt-release.md']:
     target = a.output/name
     target.parent.mkdir(parents=True, exist_ok=True)
