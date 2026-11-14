@@ -16,6 +16,7 @@ mod host_metrics;
 mod presets;
 mod process;
 mod runtime;
+mod services;
 mod store;
 mod tasks;
 mod telemetry;
@@ -153,6 +154,8 @@ fn router(app: App) -> Router {
         .route("/environment", get(environment_get))
         .route("/gateway", get(gateway_get).put(gateway_save))
         .route("/reports", get(reports))
+        .route("/services", get(service_status))
+        .route("/services/{component}/logs", get(service_logs))
         .route("/telemetry", get(telemetry_get))
         .route("/metrics", get(metrics))
         .route("/model-metrics", get(model_metrics))
@@ -251,6 +254,14 @@ async fn gateway_save(
         &serde_json::to_value(c).map_err(|e| e.to_string())?,
     )?;
     Ok(Json(json!({"saved":true})))
+}
+async fn service_logs(State(a): State<App>, Path(component): Path<String>) -> Result<Json<Value>> {
+    Ok(Json(
+        json!({"text":services::logs(&a.runtime,&component).await?}),
+    ))
+}
+async fn service_status(State(a): State<App>) -> Result<Json<Value>> {
+    Ok(Json(services::status(&a.runtime).await?))
 }
 async fn reports(State(a): State<App>) -> Result<Json<Value>> {
     Ok(Json(
@@ -479,6 +490,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let port: u16 = std::env::var("PHYXI_PORT")
         .unwrap_or("8765".into())
         .parse()?;
+    if std::env::var("PHYXI_REQUIRE_ADMIN").as_deref() == Ok("1")
+        && !data.join("admin.hash").is_file()
+    {
+        return Err("请先初始化管理员账户".into());
+    }
     let app = App {
         store: Arc::new(Store::open(&data.join("state.db"))?),
         gateway: gateway::Gateway::new(&data),

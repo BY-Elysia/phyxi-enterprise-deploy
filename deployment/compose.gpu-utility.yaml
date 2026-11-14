@@ -1,0 +1,12 @@
+# Optional inspection capability for an NVIDIA server; starts no inference service.
+services:
+  console:
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

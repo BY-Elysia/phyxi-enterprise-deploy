@@ -61,6 +61,9 @@ impl GatewayConfig {
         self.bind_ip
             .parse::<std::net::Ipv4Addr>()
             .map_err(|_| "监听地址必须是 IPv4")?;
+        if crate::services::enabled() && [8443, 8765, 8766, 18765].contains(&self.port) {
+            return Err("业务端口与控制台或接入组件保留端口冲突".into());
+        }
         if self.port < 1024 {
             return Err("使用 ≥1024 的非特权网关端口".into());
         }

@@ -127,4 +127,4 @@ python3 scripts/test-composition.py
 
 已提供根目录 `Dockerfile` 与 `compose.yaml`。在 `.env` 设置绝对路径 `PHYXI_DATA_DIR` 后执行 `docker compose up -d --build`，访问 http://127.0.0.1:8765 。支持复用已有状态目录；运行镜像不包含 Rust 工具链或模型。网络、目录挂载和 GPU/CPU 边界见 [Docker 启动说明](docs/docker.md)。
 
-企业部署使用独立的 `deployment/compose.enterprise.yaml`：console、access、gateway 三个固定容器，加一个按需模型容器；管理员 HTTPS 密码登录。根目录 Compose 保留为回环兼容开发模式。初始化、维护和加密备份详见 [Docker 运维说明](docs/docker.md)。
+新安装使用 [单控制台初始化](docs/console-only-install.md)：首次只启动 console，Nginx、工作区鉴权和模型均在页面按需部署。后续仍可配置企业 HTTPS 管理入口、证书和工作区。`deployment/compose.enterprise.yaml` 保留用于已有四容器安装维护；根目录 Compose 保留本地兼容模式，三者不要混用。

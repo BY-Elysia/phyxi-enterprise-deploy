@@ -183,6 +183,9 @@ pub(crate) async fn resolve_action(
             {
                 return Err("模型端口与控制台冲突".to_string().into());
             }
+            if crate::services::enabled() && [8443, 8766, 18765].contains(&c.port) {
+                return Err("模型端口与企业接入组件保留端口冲突".to_string().into());
+            }
             c
         }
         ("deployments", "stop") => {
@@ -193,15 +196,17 @@ pub(crate) async fn resolve_action(
         }
         (
             "gateways",
-            "certificate" | "gateway_start" | "gateway_apply" | "gateway_stop" | "verify"
-            | "publish",
+            "management_start" | "management_stop" | "certificate" | "gateway_start"
+            | "gateway_apply" | "gateway_stop" | "verify" | "publish",
         ) => {
             let profile: catalog::Gateway = cat.data(kind, id)?;
             g = profile.config;
             if access::configured() {
                 g.workspace_scope = id.clone();
             }
-            if action == "certificate" {
+            if action == "management_start" || action == "management_stop" {
+                Config::default()
+            } else if action == "certificate" {
                 if a.gateway.running().await? {
                     return Err("请先停止网关，再更换证书".to_string().into());
                 }

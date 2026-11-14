@@ -41,6 +41,9 @@ async fn docker(args: &[String]) -> Result<String, String> {
 }
 
 pub async fn check(g: &Gateway) -> Result<String, String> {
+    if crate::services::enabled() {
+        crate::services::absent(g).await?;
+    }
     let name = name().ok_or("未配置独立网关容器")?;
     if name.starts_with('-')
         || !name
@@ -93,7 +96,9 @@ pub fn bootstrap(dir: &Path) -> Result<String, String> {
     } else {
         "127.0.0.1"
     };
-    let include = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+    let include = if crate::services::enabled()
+        || std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1")
+    {
         format!("include \"{path}/management.conf\";")
     } else {
         String::new()
@@ -141,6 +146,9 @@ pub async fn apply(g: &Gateway, text: &str) -> Result<(), String> {
 }
 
 pub async fn running(g: &Gateway) -> Result<bool, String> {
+    if crate::services::enabled() && crate::services::absent(g).await? {
+        return Ok(false);
+    }
     check(g).await?;
     let path = g.dir.join("active-container.json");
     if !path.exists() {
@@ -188,7 +196,9 @@ pub async fn start(g: &Gateway, c: &GatewayConfig, m: &Config, text: &str) -> Re
     } else {
         "127.0.0.1"
     };
-    let include = if std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1") {
+    let include = if crate::services::enabled()
+        || std::env::var("PHYXI_GATEWAY_BRIDGE").as_deref() == Ok("1")
+    {
         format!("include \"{}/management.conf\";", g.dir.display())
     } else {
         String::new()

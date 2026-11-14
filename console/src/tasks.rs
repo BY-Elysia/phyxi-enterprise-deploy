@@ -11,6 +11,10 @@ use serde_json::{json, Value};
 use std::sync::{atomic::AtomicBool, Arc};
 use tokio::process::Command;
 pub const ACTIONS: &[&str] = &[
+    "management_start",
+    "management_stop",
+    "services_start",
+    "services_stop",
     "download",
     "pull_image",
     "start",
@@ -56,6 +60,20 @@ pub async fn run(
     )?;
     store.update(id, "running", action)?;
     match action {
+        "management_start" | "management_stop" => {
+            crate::services::management(runtime, gateway, g, action == "management_start").await
+        }
+        "services_start" | "services_stop" => {
+            crate::services::run(
+                runtime,
+                gateway,
+                action == "services_start",
+                id,
+                store,
+                cancel,
+            )
+            .await
+        }
         "download" => {
             if runtime
                 .status()
