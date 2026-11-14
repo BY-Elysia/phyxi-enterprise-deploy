@@ -17,7 +17,7 @@ Unix socket 权限 0660，目录 0750，由 root:phyxi-console 管理。内部�
 执行器仍是有高权限的可信组件：固定任务接口降低攻击面，并不等于沙箱。单机模式不实现跨服务器连接、mTLS 或多节点调度。
 
 ## 首次安装与更新
-Docker、显卡驱动是宿主机前提；初始化不替换驱动，不自动安装 Toolkit/Nginx/vLLM。导入并校验发布镜像后执行：
+首次由运维运行 `sudo python3 scripts/bootstrap-host.py --install`：检查已有驱动，仅在 Docker 缺失时从官方签名 APT 源安装 Docker 与 Compose；已有 Docker 不升级、不重启。显卡驱动缺失或现有 containerd/runc 包冲突时停止并说明原因，不自动卸载。初始化不安装 Toolkit/Nginx/vLLM。导入并校验发布镜像后执行：
 
 ```bash
 sudo python3 scripts/install-executor.py --data-dir /srv/phyxi/data --image sha256:<已导入镜像ID> --admin-password-file /root/phyxi-admin-password
@@ -50,3 +50,10 @@ sudo python3 scripts/install-executor.py --data-dir /srv/phyxi/data --image sha2
 用户指定在目标服务器运行测试，不启动本地控制台或测试容器。服务器执行 fmt、clippy、cargo test/build、smoke-console.py、test-api-contract.py、test-executor.py；CI重复检查并构建原生 AMD64 发布包。真实 A10 证据仅证明测试过的 GPU 容器访问，不能代替 vLLM 模型生成验收。
 
 参考：GPUStack Server/Worker 分工与允许同机部署、Portainer Server/Agent、Docker daemon 安全边界。此实现借鉴职责，不部署这些平台。
+
+## 手动备份与恢复
+使用 `sudo python3 scripts/backup-executor.py --output /srv/phyxi-backups/<新目录>`，交互输入加密密码；工具检查无执行任务后短暂停止控制台和执行器，分别加密备份执行器数据与控制台登录目录，再恢复原运行状态。模型/网关容器不停止，不备份可重新下载的模型权重。成功目录有 complete=true 的 manifest；不完整目录不能当成有效备份。
+
+恢复前停止控制台和执行器，使用发布二进制 `--restore <archive>` 分别恢复两个归档到 manifest 中记录的原始绝对路径；恢复程序拒绝更改路径，避免证书和权重引用失效。先将旧目录移至备份位置，保证原路径不存在；恢复后核对内容，并恢复 console-auth 的 10001:10001 所有权。保持原 owner 标识及服务密钥，重新启动执行器和控制台，检查容器归属和工作区接入。恢复期间禁止执行新部署任务。
+
+安装依据：[Docker Ubuntu 官方安装步骤](https://docs.docker.com/engine/install/ubuntu/)、[NVIDIA Container Toolkit 官方安装步骤](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)。

@@ -10,6 +10,8 @@ Group=phyxi-console
 UMask=0027
 RuntimeDirectory=phyxi
 RuntimeDirectoryMode=0750
+# Keep the mounted directory inode stable across executor restarts.
+RuntimeDirectoryPreserve=yes
 EnvironmentFile=/etc/phyxi/executor.env
 ExecStart=/opt/phyxi-executor/phyxi-console
 Restart=on-failure
