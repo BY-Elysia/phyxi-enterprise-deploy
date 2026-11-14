@@ -141,7 +141,20 @@ pub async fn pull(
     let mut c = Command::new("docker");
     c.args(["--host", &r.docker_host, "pull", &target]);
     let result = tokio::select! {
-        result = execute(c, Some((store.clone(), id.into())), 4 * 60 * 60) => result,
+        result = tokio::time::timeout(std::time::Duration::from_secs(4*60*60), async {
+            let mut manifest=Command::new("docker");
+            manifest.args(["--host",&r.docker_host,"manifest","inspect","--verbose",&target]);
+            if let Ok(raw)=execute(manifest,None,25).await {
+                if let Ok(value)=serde_json::from_str::<Value>(&raw) {
+                    let key=format!("progress:{id}");
+                    let mut p:crate::download_progress::Progress=serde_json::from_value(store.setting(&key)?).map_err(|e|e.to_string())?;
+                    let arch=match std::env::consts::ARCH {"x86_64"=>"amd64","aarch64"=>"arm64",other=>other};
+                    p.manifest(&value,arch);
+                    store.set_setting(&key,&serde_json::to_value(p).map_err(|e|e.to_string())?)?;
+                }
+            }
+            crate::pull_terminal::execute(c,store.clone(),id).await
+        }) => result.unwrap_or_else(|_|Err("镜像下载超时".into())),
         _ = async {
             loop {
                 if cancel.load(Ordering::SeqCst) { break; }
@@ -157,6 +170,21 @@ pub async fn pull(
         return Err("镜像下载未完成。请在“镜像下载来源”检查网络或改用企业仓库，然后重试；原始错误见任务日志。不会自动切换来源。".into());
     }
     let image = r.local_image(&target).await?;
+    let key = format!("progress:{id}");
+    let mut progress: crate::download_progress::Progress =
+        serde_json::from_value(store.setting(&key)?).map_err(|e| e.to_string())?;
+    for state in progress.layers.values_mut() {
+        if state != "已缓存" {
+            *state = "已就绪".into();
+        }
+    }
+    progress.measure();
+    progress.phase = "镜像准备完成".into();
+    progress.speed_bps = None;
+    store.set_setting(
+        &key,
+        &serde_json::to_value(progress).map_err(|e| e.to_string())?,
+    )?;
     store.event(
         id,
         &format!("镜像已准备：{}；按本地不可变 ID 部署。", image["Id"]),

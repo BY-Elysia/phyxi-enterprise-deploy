@@ -19,10 +19,13 @@ elif cmd=='image':
  if p.with_suffix('.missing-image').exists():sys.exit(1)
  if p.with_suffix('.slow').exists():time.sleep(.6)
  print(json.dumps({'Id':'sha256:'+'b'*64,'Architecture':'amd64','Size':1234}))
+elif cmd=='manifest':
+ print(json.dumps({'Descriptor':{'platform':{'architecture':'amd64','os':'linux'}},'SchemaV2Manifest':{'layers':[{'digest':'sha256:'+'abcdef123456'+'0'*52,'size':1000000}]}}))
 elif cmd=='pull':
+ assert sys.stdout.isatty(), 'pull must receive a terminal for byte progress'
  if p.with_suffix('.slow').exists():time.sleep(.6)
  p.with_suffix('.missing-image').unlink(missing_ok=True)
- print('abcdef123456: Pulling fs layer');print('abcdef123456: Download complete');print('abcdef123456: Pull complete');print('fake image ready')
+ print('abcdef123456: Pulling fs layer');print('abcdef123456: Downloading [====>]  500kB/1MB');print('abcdef123456: Download complete');print('abcdef123456: Pull complete');print('fake image ready')
 elif cmd=='run':
  assert '--privileged' not in args
  assert args[args.index('--publish')+1].startswith('127.0.0.1:')

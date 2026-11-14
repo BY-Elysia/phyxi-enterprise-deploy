@@ -19,6 +19,7 @@ mod host_setup;
 mod image_sources;
 mod presets;
 mod process;
+mod pull_terminal;
 mod runtime;
 mod services;
 mod store;
@@ -334,6 +335,8 @@ async fn jobs(State(a): State<App>) -> Result<Json<Value>> {
         let mut progress = a.store.setting(&format!("progress:{}", job.id))?;
         if let Some(object) = progress.as_object_mut() {
             object.remove("pending");
+            object.remove("escape_state");
+            object.remove("expected_bytes");
         }
         row["progress"] = progress;
         rows.push(row);
