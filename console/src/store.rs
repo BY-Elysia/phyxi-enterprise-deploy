@@ -22,12 +22,34 @@ impl Store {
     pub fn open(path: &Path) -> Result<Self, String> {
         let c = Connection::open(path).map_err(|e| e.to_string())?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
+        CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, status INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, action TEXT NOT NULL, status TEXT NOT NULL, step TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP, config TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, message TEXT NOT NULL);
         UPDATE jobs SET status='interrupted', step='控制台重启；请检查运行状态，停止后再部署' WHERE status='running';").map_err(|e|e.to_string())?;
         Ok(Self(Mutex::new(c)))
+    }
+    pub fn audit(&self, actor: &str, action: &str, status: u16) -> Result<(), String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        c.execute(
+            "INSERT INTO audit(actor,action,status) VALUES(?1,?2,?3)",
+            params![actor, action.chars().take(256).collect::<String>(), status],
+        )
+        .map_err(|e| e.to_string())?;
+        c.execute("DELETE FROM audit WHERE seq NOT IN (SELECT seq FROM audit ORDER BY seq DESC LIMIT 5000)",[]).map_err(|e|e.to_string())?;
+        Ok(())
+    }
+    pub fn audit_rows(&self) -> Result<serde_json::Value, String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        let mut q = c
+            .prepare("SELECT actor,action,status,created FROM audit ORDER BY seq DESC LIMIT 200")
+            .map_err(|e| e.to_string())?;
+        let rows=q.query_map([],|r|Ok(serde_json::json!({"actor":r.get::<_,String>(0)?,"action":r.get::<_,String>(1)?,"status":r.get::<_,u16>(2)?,"created":r.get::<_,String>(3)?}))).map_err(|e|e.to_string())?;
+        Ok(serde_json::Value::Array(
+            rows.collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?,
+        ))
     }
     pub fn setting(&self, key: &str) -> Result<serde_json::Value, String> {
         let c = self.0.lock().map_err(|e| e.to_string())?;

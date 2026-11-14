@@ -48,3 +48,13 @@ docker compose -f compose.yaml -f deployment/compose.gateway.yaml up -d --build
 已有 `gateway/nginx.conf` 时初始化脚本拒绝覆盖。迁移前先确认旧网关已停止并备份配置，再人工移走旧 nginx.conf，执行初始化；不要覆盖运行配置。网关容器只挂载 gateway 子目录，不挂载 Docker socket、控制台数据库或模型权重。控制台通过标签和完全一致的目录挂载核对归属，校验后重载配置，读取运行配置摘要确认加载成功；控制台对象/进程重建后从持久化快照和实际摘要恢复状态。停止网关只停用业务监听，Nginx 容器保留诊断监听 127.0.0.1:18765。
 
 真实容器验证：`python3 scripts/test-gateway-container.py`。该脚本使用独立临时目录、唯一容器名，检查 TLS 匿名拒绝、控制对象重建恢复、无效配置保留原服务、错误挂载归属拒绝及停止，只清理自身创建的容器。不验证 GPU 推理或工作区独立密钥。
+
+## P2a：管理员密码初始化
+
+密码登录模块就绪，但正式内网 HTTPS 入口仍需后续网络阶段；不要把本地兼容接口直接发布到内网。
+
+先停止控制台，对同一状态目录执行 `scripts/set-admin-password.py --data-dir /absolute/state/path --binary /absolute/path/phyxi-console`。脚本用隐藏输入读取密码，经 stdin 传入，不放入命令参数。容器部署可在停止 console 后使用 `docker compose run --rm -T console --set-admin` 从安全的 stdin 输入密码（不把明文写进命令或提交文件）。必须使用 Linux 容器二进制或当前主机兼容的二进制。密码至少 12 字节；admin.hash 仅存 Argon2id 哈希。服务锁防止运行中重置；重启使内存会话失效。
+
+存在 admin.hash 时前端自动切换为管理员密码登录，旧 Bearer Token 被拒绝。正式会话 Cookie 强制 Secure、HttpOnly、SameSite=Strict，有效期 8 小时；写操作需要 CSRF token。开发回环 HTTP 调试可显式设置 `PHYXI_LOCAL_HTTP_LOGIN=1`，仅限本地环境，不能作为企业 HTTPS 的替代。登录限速为全管理员入口每分钟 5 次、最多 32 个有效会话；无多账号或 SSO。
+
+网关对象增加“上传企业证书”：三个 PEM 文件各最多 64 KiB，校验通过后保存为草稿，私钥仅保存在权限受限目录。应用证书仍走显式准备/启动流程，不自动改变运行网关。管理员审计在“操作记录”展开查看，最多保存 5000 条、返回最新 200 条，仅记录账号/动作/状态/时间，来源地址将在可信网关接入阶段补齐。

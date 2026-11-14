@@ -134,6 +134,41 @@ impl Gateway {
         c.args(args);
         execute(c, None, 30).await
     }
+    pub async fn validate_certificates(&self, c: &GatewayConfig) -> Result<(), String> {
+        c.validate()?;
+        self.openssl(vec![
+            "verify".into(),
+            "-CAfile".into(),
+            c.ca_file.clone(),
+            "-untrusted".into(),
+            c.cert_file.clone(),
+            "-verify_hostname".into(),
+            c.domain.clone(),
+            c.cert_file.clone(),
+        ])
+        .await?;
+        let a = self
+            .openssl(vec![
+                "x509".into(),
+                "-in".into(),
+                c.cert_file.clone(),
+                "-pubkey".into(),
+                "-noout".into(),
+            ])
+            .await?;
+        let b = self
+            .openssl(vec![
+                "pkey".into(),
+                "-in".into(),
+                c.key_file.clone(),
+                "-pubout".into(),
+            ])
+            .await?;
+        if a.trim() != b.trim() {
+            return Err("证书与私钥不匹配".into());
+        }
+        Ok(())
+    }
     pub async fn certificates(&self, c: &GatewayConfig) -> Result<(), String> {
         c.validate()?;
         if self.running().await? {
@@ -141,37 +176,7 @@ impl Gateway {
         }
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         if c.tls_mode == "enterprise" {
-            self.openssl(vec![
-                "verify".into(),
-                "-CAfile".into(),
-                c.ca_file.clone(),
-                "-untrusted".into(),
-                c.cert_file.clone(),
-                "-verify_hostname".into(),
-                c.domain.clone(),
-                c.cert_file.clone(),
-            ])
-            .await?;
-            let a = self
-                .openssl(vec![
-                    "x509".into(),
-                    "-in".into(),
-                    c.cert_file.clone(),
-                    "-pubkey".into(),
-                    "-noout".into(),
-                ])
-                .await?;
-            let b = self
-                .openssl(vec![
-                    "pkey".into(),
-                    "-in".into(),
-                    c.key_file.clone(),
-                    "-pubout".into(),
-                ])
-                .await?;
-            if a.trim() != b.trim() {
-                return Err("证书与私钥不匹配".into());
-            }
+            self.validate_certificates(c).await?;
             for (src, dst) in [
                 (&c.cert_file, "server.pem"),
                 (&c.key_file, "server.key"),

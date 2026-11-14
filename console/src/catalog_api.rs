@@ -248,3 +248,80 @@ pub(crate) async fn model_status(
         .unwrap_or_else(|| std::path::PathBuf::from(m.model_path));
     Ok(Json(artifacts::readiness(&path, m.source.as_ref())))
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CertificateUpload {
+    revision: u64,
+    certificate: String,
+    private_key: String,
+    ca: String,
+}
+pub(crate) async fn certificate_upload(
+    State(a): State<App>,
+    Path(id): Path<String>,
+    Json(body): Json<CertificateUpload>,
+) -> Result<Json<Value>> {
+    let _permit = a
+        .gate
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| Error(StatusCode::CONFLICT, "任务执行中".into()))?;
+    let mut cat = catalog::Catalog::load(&a.store)?;
+    let mut record = cat.get("gateways", &id)?.clone();
+    if record.revision != body.revision {
+        return Err(Error(
+            StatusCode::CONFLICT,
+            "配置已更新，请刷新后重新上传".into(),
+        ));
+    }
+    for text in [&body.certificate, &body.private_key, &body.ca] {
+        if text.is_empty() || text.len() > 65536 {
+            return Err("证书文件为空或超过 64 KiB".to_string().into());
+        }
+    }
+    let directory = a
+        .runtime
+        .data
+        .join("certificates")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
+        .map_err(|e| e.to_string())?;
+    let result: std::result::Result<(), String> = async {
+        for (name, text) in [
+            ("server.pem", &body.certificate),
+            ("server.key", &body.private_key),
+            ("ca.pem", &body.ca),
+        ] {
+            let mut f = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(directory.join(name))
+                .map_err(|e| e.to_string())?;
+            f.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        let mut gateway: catalog::Gateway =
+            serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
+        gateway.config.tls_mode = "enterprise".into();
+        gateway.config.cert_file = directory.join("server.pem").display().to_string();
+        gateway.config.key_file = directory.join("server.key").display().to_string();
+        gateway.config.ca_file = directory.join("ca.pem").display().to_string();
+        a.gateway.validate_certificates(&gateway.config).await?;
+        record.data = serde_json::to_value(gateway).map_err(|e| e.to_string())?;
+        cat.put("gateways", &id, record)?;
+        cat.save(&a.store)?;
+        Ok(())
+    }
+    .await;
+    if let Err(e) = result {
+        let _ = fs::remove_dir_all(&directory);
+        return Err(e.into());
+    }
+    Ok(Json(
+        json!({"saved":true,"applied":false,"record":cat.get("gateways",&id)?}),
+    ))
+}

@@ -1,3 +1,4 @@
+mod admin;
 mod artifacts;
 mod catalog;
 mod catalog_api;
@@ -49,6 +50,7 @@ struct App {
     runtime: Runtime,
     gateway: gateway::Gateway,
     token: String,
+    admin: Option<Arc<admin::Admin>>,
     gate: Arc<Semaphore>,
     cancel: Arc<AtomicBool>,
 }
@@ -65,19 +67,31 @@ impl IntoResponse for Error {
 }
 type Result<T> = std::result::Result<T, Error>;
 async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
-    if request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        != Some(&format!("Bearer {}", a.token))
-    {
+    let write = !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    );
+    let allowed = if let Some(admin) = &a.admin {
+        admin.authorize(request.headers(), write)
+    } else {
+        request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            == Some(&format!("Bearer {}", a.token))
+    };
+    if !allowed {
         return (
             StatusCode::UNAUTHORIZED,
-            Json(json!({"error":"请填写本机控制台访问令牌"})),
+            Json(json!({"error":"请登录控制台；写操作需有效会话和 CSRF 校验"})),
         )
             .into_response();
     }
+    let action = format!("{} {}", request.method(), request.uri().path());
     let mut response = next.run(request).await;
+    if write {
+        let _ = a.store.audit("admin", &action, response.status().as_u16());
+    }
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
@@ -85,6 +99,17 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route(
+            "/gateways/{id}/certificate",
+            post(catalog_api::certificate_upload)
+                .layer(axum::extract::DefaultBodyLimit::max(220000)),
+        )
+        .route(
+            "/audit",
+            get(|State(a): State<App>| async move {
+                a.store.audit_rows().map(Json).map_err(Error::from)
+            }),
+        )
         .route("/presets", get(|| async { Json(presets::list()) }))
         .route("/models/{id}/status", get(catalog_api::model_status))
         .route("/catalog", get(catalog_get))
@@ -110,6 +135,9 @@ fn router(app: App) -> Router {
         .route("/actions/{action}", post(action))
         .route_layer(middleware::from_fn_with_state(app.clone(), auth));
     Router::new()
+        .route("/api/auth/info", get(admin::info))
+        .route("/api/auth/login", post(admin::login))
+        .route("/api/auth/logout", post(admin::logout))
         .route(
             "/",
             get(|| async { Html(include_str!("../web/index.html")) }),
@@ -134,6 +162,11 @@ fn router(app: App) -> Router {
         )
         .nest("/api", api)
         .layer(axum::extract::DefaultBodyLimit::max(16384))
+        .layer(middleware::from_fn(|request:Request,next:Next| async move {
+            let mut response=next.run(request).await;
+            for (name,value) in [("cache-control","no-store"),("x-content-type-options","nosniff"),("referrer-policy","no-referrer"),("content-security-policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")] {response.headers_mut().insert(axum::http::HeaderName::from_static(name),value.parse().unwrap());}
+            response
+        }))
         .with_state(app)
 }
 async fn model_metrics(State(a): State<App>) -> Result<Json<Value>> {
@@ -350,6 +383,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         .open(data.join("server.lock"))?;
     lock.try_lock_exclusive()
         .map_err(|_| "此状态目录已有控制台运行")?;
+    if std::env::args().nth(1).as_deref() == Some("--set-admin") {
+        use std::io::Read;
+        let mut password = String::new();
+        std::io::stdin().take(1024).read_to_string(&mut password)?;
+        admin::set_password(&data, password.trim_end_matches(['\r', '\n']))?;
+        println!("管理员密码已设置；重启控制台后旧会话失效。");
+        return Ok(());
+    }
     let host = std::env::var("PHYXI_DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
     if !host.starts_with("unix:///") {
         return Err("首版仅支持本地 Unix Docker socket".into());
@@ -362,6 +403,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         gateway: gateway::Gateway::new(&data),
         runtime: Runtime::new(private_file(&data.join("owner"))?, host, data.clone()),
         token: private_file(&data.join("token"))?,
+        admin: admin::Admin::load(&data)?,
         gate: Arc::new(Semaphore::new(1)),
         cancel: Arc::new(AtomicBool::new(false)),
     };
@@ -395,6 +437,7 @@ mod tests {
                 std::env::temp_dir(),
             ),
             token: "test-token".into(),
+            admin: None,
             gate: Arc::new(Semaphore::new(1)),
             cancel: Arc::new(AtomicBool::new(false)),
         }
