@@ -43,7 +43,7 @@ manifest = {'config_id': config_id, 'format': 1, 'revision': a.revision, 'image'
             'platform': 'linux/'+info['Architecture'], 'sha256': digest.hexdigest()}
 (a.output/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
 (a.output/'SHA256SUMS').write_text(digest.hexdigest()+'  console-image.tar.gz\n')
-for name in ['scripts/bootstrap-console.py', 'scripts/console-image.py',
+for name in ['scripts/bootstrap-console.py', 'scripts/console-image.py', 'scripts/fetch-console-release.py',
              'deployment/compose.console-only.yaml', 'deployment/compose.gpu-utility.yaml',
              'docs/console-only-install.md', 'docs/prebuilt-release.md']:
     target = a.output/name

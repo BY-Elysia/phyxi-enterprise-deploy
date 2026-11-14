@@ -6,7 +6,16 @@
 
 安装包包含压缩镜像、manifest.json（源码提交、镜像 ID、架构、SHA256）、SHA256SUMS、安装脚本与 Compose 文件。不含编译工具链、数据库、证书或密码。Actions 产物保存 30 天；长期版本应由运维归档下载包。本期提供 Actions 构建产物，不自动创建 GitHub Release 标签。
 
-本机先下载并传入服务器（RUN_ID 使用成功工作流的运行编号）：
+优先从本机发起、让服务器直接下载（RUN_ID 使用成功工作流的运行编号）：
+
+```bash
+python3 scripts/fetch-console-release.py --run RUN_ID \
+  --ssh root@SERVER --output /opt/phyxi-release-COMMIT_SHA
+```
+
+本机需要已登录 gh；脚本核对成功工作流和提交 SHA，只把临时下载地址经 SSH stdin 传给服务器，GitHub 登录令牌不离开本机。服务器下载后核对源码版本、架构及镜像 SHA256，不启动容器；目标目录已存在会拒绝覆盖。随后使用下文 --bundle 指向该目录安装。
+
+若服务器无法访问产物存储，可在本机先下载并传入服务器：
 
 ```bash
 gh run download RUN_ID --repo BY-Elysia/phyxi-enterprise-deploy \
@@ -57,3 +66,5 @@ CI 使用原生 AMD64 构建，避免 Mac ARM 模拟编译；Dockerfile 将依�
 构建缓存参考 [Docker 官方说明](https://docs.docker.com/build/cache/backends/gha/)。CI 仍需网络和首次构建时间；优化是把这些工作移到发布前，不保证所有网络环境的固定部署秒数。SHA256 用于完整性检查，不替代可信产物来源；下载应选择本仓库成功的工作流。
 
 源码现场构建仍可显式使用 --build，仅供开发或应急，不是服务器默认安装路径。
+
+2026-11-14 实测：在已有 Docker 和基础镜像层的验证服务器，直接下载及校验约 13 秒，镜像校验/导入约 3 秒。仅作该次环境记录，冷导入和其他网络需另测。Docker/containerd 可能在导入时改变索引 ID；工具通过实际镜像 config 内容摘要核对后固定目标引擎的 ID，不仅检查标签。

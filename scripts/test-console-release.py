@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 import unittest
+import io
+import zipfile
 from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location('images',Path(__file__).with_name('console-image.py'))
@@ -26,6 +28,20 @@ class ReleaseValidation(unittest.TestCase):
             with patch.object(images,'host_arch',return_value='amd64'),patch.object(images.subprocess,'run') as run:
                 with self.assertRaisesRegex(ValueError,'checksum'):images.prepare(bundle=d)
                 run.assert_not_called()
+    def test_imported_index_identity_may_change_but_config_must_match(self):
+        with tempfile.TemporaryDirectory() as td:
+            d=Path(td);payload=b'archive';(d/'console-image.tar.gz').write_bytes(payload)
+            manifest={'format':1,'image':'phyxi-console:release','platform':'linux/amd64','image_id':'sha256:'+'a'*64,'config_id':'sha256:'+'c'*64,'sha256':hashlib.sha256(payload).hexdigest()}
+            (d/'manifest.json').write_text(json.dumps(manifest))
+            info={'Os':'linux','Architecture':'amd64','Id':'sha256:'+'b'*64}
+            def lookup(reference):
+                if reference==manifest['image']:return info
+                raise subprocess.CalledProcessError(1,['docker'])
+            with patch.object(images,'host_arch',return_value='amd64'),patch.object(images,'inspect',side_effect=lookup),patch.object(images.subprocess,'run'),patch.object(images,'config_matches',return_value=True):
+                self.assertEqual(images.prepare(bundle=d),info['Id'])
+            with patch.object(images,'host_arch',return_value='amd64'),patch.object(images,'inspect',side_effect=lookup),patch.object(images.subprocess,'run'),patch.object(images,'config_matches',return_value=False):
+                with self.assertRaisesRegex(ValueError,'config does not match'):images.prepare(bundle=d)
+
     def test_local_image_never_pulls_and_is_pinned(self):
         info={'Os':'linux','Architecture':'amd64','Id':'sha256:'+'b'*64}
         with patch.object(images,'host_arch',return_value='x86_64'),patch.object(images,'inspect',return_value=info),patch.object(images.subprocess,'run') as run:
@@ -70,5 +86,25 @@ elif args[0]=='compose' and '--set-admin' in args:assert len(sys.stdin.read())>=
                 up=next(c for c in calls if 'up' in c)
                 self.assertIn('--no-build',up)
                 self.assertEqual(up[up.index('--pull')+1],'never')
+
+class DownloadValidation(unittest.TestCase):
+    def test_bundle_paths_and_checksum(self):
+        spec=importlib.util.spec_from_file_location('fetcher',Path(__file__).with_name('fetch-console-release.py'))
+        fetcher=importlib.util.module_from_spec(spec);spec.loader.exec_module(fetcher)
+        for bad in [False,True]:
+            archive=io.BytesIO();image=b'image fixture'
+            with zipfile.ZipFile(archive,'w') as z:
+                z.writestr('manifest.json',json.dumps({'revision':'a'*40,'platform':'linux/amd64','sha256':hashlib.sha256(image).hexdigest()}))
+                z.writestr('console-image.tar.gz',image)
+                if bad:z.writestr('../outside','no')
+            with tempfile.TemporaryDirectory() as td:
+                output=Path(td)/'release'
+                with patch('urllib.request.urlopen',return_value=io.BytesIO(archive.getvalue())):
+                    if bad:
+                        with self.assertRaisesRegex(ValueError,'Unsafe'):fetcher.download({'url':'https://example.invalid','output':str(output),'revision':'a'*40})
+                        self.assertFalse(output.exists())
+                    else:
+                        fetcher.download({'url':'https://example.invalid','output':str(output),'revision':'a'*40})
+                        self.assertEqual((output/'console-image.tar.gz').read_bytes(),image)
 
 unittest.main()

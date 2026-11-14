@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tarfile
 from pathlib import Path
 
 
@@ -45,23 +46,51 @@ def verify_bundle(directory, arch):
     return manifest, archive
 
 
+def config_matches(image_id, expected):
+    """Docker/containerd may rewrite index identity on load; config content remains stable."""
+    proc = subprocess.Popen(['docker', 'save', image_id], stdout=subprocess.PIPE)
+    matched = False
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode='r|') as archive:
+            for member in archive:
+                filename = member.name.rsplit('/', 1)[-1].removesuffix('.json')
+                if member.isfile() and member.size <= 4*1024*1024 and filename == expected.removeprefix('sha256:'):
+                    matched = 'sha256:'+hashlib.sha256(archive.extractfile(member).read()).hexdigest() == expected
+        # Drain remaining tar padding so the producer completes normally.
+        while proc.stdout.read(1024*1024):
+            pass
+        return proc.wait() == 0 and matched
+    finally:
+        proc.stdout.close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 def prepare(image=None, bundle=None):
     if bundle:
         manifest, archive = verify_bundle(bundle, host_arch())
+        reference = manifest.get('image', '')
+        if not reference or reference.startswith('-') or any(c.isspace() for c in reference):
+            raise ValueError('Invalid release image reference')
         def find_image():
-            # containerd uses the manifest identity; classic Docker uses the config identity.
+            # containerd may rewrite an OCI index when importing a Docker archive.
             for identity in (manifest['image_id'], manifest['config_id']):
                 try:
                     return inspect(identity)
                 except subprocess.CalledProcessError:
                     pass
-            return None
+            try:
+                candidate = inspect(reference)
+            except subprocess.CalledProcessError:
+                return None
+            return candidate if config_matches(candidate['Id'], manifest['config_id']) else None
         info = find_image()
         if info is None:
             subprocess.run(['docker', 'load', '--input', str(archive)], check=True)
             info = find_image()
         if info is None:
-            raise ValueError('Loaded image does not match the release identities')
+            raise ValueError('Loaded image config does not match the release')
         if info['Os'] != 'linux' or normalized(info['Architecture']) != normalized(host_arch()):
             raise ValueError('Loaded image platform mismatch')
         return info['Id']
