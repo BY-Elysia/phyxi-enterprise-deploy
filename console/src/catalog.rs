@@ -37,6 +37,8 @@ pub struct Image {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Parameters {
+    #[serde(default)]
+    pub vllm: crate::vllm::Options,
     pub engine: Engine,
     pub max_model_len: u32,
     pub max_num_seqs: u32,
@@ -191,7 +193,7 @@ impl Catalog {
             },
             model_path: path,
             image,
-            tensor_parallel: d.gpu_uuids.len().max(1),
+            tensor_parallel: d.gpu_uuids.len().max(1) / r.vllm.pipeline_parallel().max(1),
             gpu_uuids: d.gpu_uuids,
             port: d.port,
             max_model_len: r.max_model_len,
@@ -201,6 +203,7 @@ impl Catalog {
             reasoning_parser: r.reasoning_parser,
             verify_tools: r.verify_tools,
             verify_images: r.verify_images,
+            vllm: r.vllm,
         };
         Ok(c)
     }
@@ -295,7 +298,14 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
             image_valid(&image.reference)?;
         }
         "runtimes" => {
-            let r: Parameters = decode(v.clone())?;
+            let mut r: Parameters = decode(v.clone())?;
+            r.vllm.validate(r.max_model_len, r.max_num_seqs)?;
+            if r.engine != Engine::Vllm && !r.vllm.is_empty() {
+                return Err("vLLM 专属参数不能用于其他引擎".into());
+            }
+            // Runtime profiles have no GPU allocation yet. Validate PP above,
+            // then use PP=1 only for the synthetic single-GPU Config check.
+            r.vllm.parameters.remove("pipeline-parallel-size");
             let c = Config {
                 engine: r.engine.clone(),
                 model_path: if r.engine == Engine::LlamaCpu {
@@ -316,6 +326,7 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
                 reasoning_parser: r.reasoning_parser,
                 verify_tools: r.verify_tools,
                 verify_images: r.verify_images,
+                vllm: r.vllm,
                 ..Config::default()
             };
             c.validate()?;
@@ -371,7 +382,7 @@ pub fn migrate(s: &Store) -> Result<(), String> {
         ),
         (
             "runtimes",
-            json!({"engine":c.engine,"max_model_len":c.max_model_len,"max_num_seqs":c.max_num_seqs,"gpu_memory_utilization":c.gpu_memory_utilization,"tool_parser":c.tool_parser,"reasoning_parser":c.reasoning_parser,"verify_tools":c.verify_tools,"verify_images":c.verify_images}),
+            json!({"engine":c.engine,"max_model_len":c.max_model_len,"max_num_seqs":c.max_num_seqs,"gpu_memory_utilization":c.gpu_memory_utilization,"tool_parser":c.tool_parser,"reasoning_parser":c.reasoning_parser,"verify_tools":c.verify_tools,"verify_images":c.verify_images,"vllm":c.vllm}),
         ),
         (
             "deployments",

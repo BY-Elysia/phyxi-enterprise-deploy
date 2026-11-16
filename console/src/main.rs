@@ -4,6 +4,7 @@ mod artifacts;
 mod backup;
 mod catalog;
 mod catalog_api;
+mod vllm;
 use catalog_api::{
     catalog_delete, catalog_get, catalog_put, deployment_preview, image_status, resolve_action,
     workspace_export, Scope,

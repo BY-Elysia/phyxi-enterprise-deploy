@@ -275,6 +275,7 @@ impl Runtime {
         }
         if c.engine == Engine::Vllm {
             args.push("--disable-log-requests".into());
+            args.extend(c.vllm.args());
         }
         if c.engine == Engine::Sglang {
             let entry = args.iter().position(|a| a == "--entrypoint").unwrap();

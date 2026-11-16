@@ -17,6 +17,8 @@ pub struct Config {
     pub max_model_len: u32,
     pub max_num_seqs: u32,
     pub gpu_memory_utilization: f64,
+    #[serde(default)]
+    pub vllm: crate::vllm::Options,
     pub port: u16,
     pub tool_parser: String,
     pub reasoning_parser: String,
@@ -38,6 +40,7 @@ impl Default for Config {
             max_model_len: 8192,
             max_num_seqs: 8,
             gpu_memory_utilization: 0.85,
+            vllm: Default::default(),
             port: 18000,
             tool_parser: "".into(),
             reasoning_parser: "".into(),
@@ -63,6 +66,10 @@ fn identifier(s: &str) -> bool {
 }
 impl Config {
     pub fn validate(&self) -> Result<(), String> {
+        self.vllm.validate(self.max_model_len, self.max_num_seqs)?;
+        if self.engine != Engine::Vllm && !self.vllm.is_empty() {
+            return Err("vLLM 专属参数不能用于其他引擎".into());
+        }
         if let Some(source) = &self.source {
             source.validate()?;
             if self.engine != Engine::LlamaCpu && !source.file.is_empty() {
@@ -115,8 +122,12 @@ impl Config {
                 return Err("GPU UUID 格式错误".into());
             }
         }
-        if self.tensor_parallel != self.gpu_uuids.len() {
-            return Err("首版单实例 TP 必须等于选中的 GPU 数量".into());
+        if self
+            .tensor_parallel
+            .checked_mul(self.vllm.pipeline_parallel())
+            != Some(self.gpu_uuids.len())
+        {
+            return Err("单机 TP × PP 必须等于选中的 GPU 数量".into());
         }
         if !(512..=1_048_576).contains(&self.max_model_len)
             || !(1..=256).contains(&self.max_num_seqs)

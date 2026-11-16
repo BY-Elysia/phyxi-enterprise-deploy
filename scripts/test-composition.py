@@ -39,9 +39,22 @@ def main():
    base=call('/config');model_data={'model_name':'composition-test','model_path':str(model.resolve()),'source':None}
    params={k:base[k] for k in ['engine','max_model_len','max_num_seqs','gpu_memory_utilization','tool_parser','reasoning_parser','verify_tools','verify_images']};params.update(engine='llama_cpu',max_model_len=512,max_num_seqs=1)
    put('models','m',model_data);put('runtimes','r',params)
+   # Optional vLLM profiles round-trip independently of GPU allocation.
+   advanced={**params,'engine':'vllm','max_model_len':8192,'max_num_seqs':8,'vllm':{'parameters':{'dtype':'bfloat16','pipeline-parallel-size':2,'enable-prefix-caching':False},'extra':{'block-size':16}}}
+   put('runtimes','advanced',advanced)
+   for invalid in [{'extra':{'host':'0.0.0.0'}},{'parameters':{'seed':-1}},{'parameters':{'compilation-config':{'backend':'foreign.module'}}}]:
+    put('runtimes','invalid',{**advanced,'vllm':invalid},expected=400)
+   put('runtimes','invalid',{**params,'vllm':advanced['vllm']},expected=400)
+   assert call('/catalog')['records']['runtimes']['advanced']['data']['vllm']==advanced['vllm']
    g=call('/gateway')['config'];g['port']=port();put('gateways','g',{'deployment':'','config':g})
    put('workspaces','w',{'gateway':'g','credential_env':'PHYXI_API_KEY'})
    put('images','i',{'reference':'vllm/vllm-openai@sha256:'+'a'*64});task('pull_image','images','i')
+   gpu_dep={'model':'m','image':'i','runtime':'advanced','gpu_uuids':['GPU-00000000-0000-0000-0000-000000000001','GPU-00000000-0000-0000-0000-000000000002'],'port':port()}
+   put('deployments','gpu',gpu_dep)
+   preview=call('/deployments/gpu/preview');assert preview['config']['tensor_parallel']==1 and preview['config']['vllm']==advanced['vllm']
+   put('deployments','gpu',{**gpu_dep,'gpu_uuids':gpu_dep['gpu_uuids'][:1]},1)
+   call('/deployments/gpu/preview',expected=400)
+   call('/catalog/deployments/gpu','DELETE')
    dep={'model':'m','image':'','runtime':'r','gpu_uuids':[],'port':port()}
    put('deployments','a',dep);put('deployments','b',dep)
    put('deployments','bad',{**dep,'model':'missing'},expected=400)
@@ -74,6 +87,7 @@ def main():
    for _ in range(100):
     try:cat=call('/catalog');break
     except OSError:time.sleep(.1)
+   assert cat['records']['runtimes']['advanced']['data']['vllm']==advanced['vllm']
    assert cat['records']['runtimes']['r']['revision']==2 and 'm' not in cat['records']['models']
    print('PASS: independent CRUD, reference protection, optimistic revision checks, composition, ownership, snapshot isolation, workspace export, persistence'+(' and real CPU/TLS publication' if args.llama else ' (protocol fixture)'))
   finally:

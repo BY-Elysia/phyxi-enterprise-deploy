@@ -1,7 +1,7 @@
 //! Curated addresses only: reading this catalog never downloads images or weights.
 use serde_json::{json, Value};
 pub fn list() -> Value {
-    json!({"images":[
+    json!({"vllm_parameters":crate::vllm::schema(),"images":[
  {"id":"vllm","name":"vLLM v0.11.0 · 官方镜像摘要","engine":"vllm","reference":"vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c","note":"NVIDIA GPU 用；先下载，再部署。版本可自行修改。"},
  {"id":"sglang","name":"SGLang v0.5.5 · 官方镜像摘要","engine":"sglang","reference":"lmsysorg/sglang@sha256:5877b90ffcdba23b6072ee90a2f3ab046e926be19dd828074a6956a0c6c77ba5","note":"NVIDIA GPU 用；需搭配 SGLang 推理参数。"}],
  "models":[

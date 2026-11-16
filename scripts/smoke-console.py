@@ -30,6 +30,11 @@ elif cmd=='run':
  assert '--privileged' not in args
  assert args[args.index('--publish')+1].startswith('127.0.0.1:')
  assert args[args.index('--mount')+1].endswith(',readonly')
+ if '--dtype' in args:
+  assert args[args.index('--dtype')+1]=='bfloat16'
+  assert '--no-enable-prefix-caching' in args
+  assert json.loads(args[args.index('--limit-mm-per-prompt')+1])=={'image':2}
+  assert args[args.index('--block-size')+1]=='16'
  labels=dict(args[i+1].split('=',1) for i,x in enumerate(args) if x=='--label')
  image=next(x for x in args if '@sha256:' in x or x.startswith('sha256:'))
  p.write_text(json.dumps({'Config':{'Labels':labels,'Image':image},'State':{'Running':True,'Status':'running','StartedAt':'test'}}));print('fake-id')
@@ -84,8 +89,10 @@ def main():
    assert call('/api/reports')['releases'] is None
    cfg=call('/api/config');call('/api/config','PUT',cfg,expected=400)
    cfg.update(model_path=str(model),image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'])
+   cfg['vllm']={'parameters':{'dtype':'bfloat16','enable-prefix-caching':False,'max-num-batched-tokens':8192,'limit-mm-per-prompt':{'image':2}},'extra':{'block-size':16}}
    call('/api/config','PUT',cfg)
    id=call('/api/actions/start','POST',expected=202)['id'];job=wait(id);assert job['status']=='succeeded',job
+   assert job['config']['vllm']==cfg['vllm']
    assert call('/api/status')['state']=='running'
    events=call('/api/jobs/'+id+'/events');assert events and call('/api/jobs/'+id+'/events?after='+str(events[-1]['seq']))==[]
    assert 'stderr' in call('/api/logs')['text']
