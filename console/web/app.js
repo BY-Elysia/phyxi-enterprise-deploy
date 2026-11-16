@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const titles={deployments:'部署实例',models:'模型权重',images:'推理引擎镜像',runtimes:'推理参数',gateways:'企业网关',workspaces:'客户端工作区',environment:'服务器资源与依赖',tasks:'操作记录',reports:'验收与发布'};
 const descriptions={deployments:'把模型权重、推理镜像和推理参数组合成服务，选择 GPU 与端口，再启动或停止。',models:'选择 GLM、Qwen 等预设来源或自定义仓库，先下载权重，也可使用自行准备的本地文件。预设只填地址，不自动下载。',images:'管理 vLLM / SGLang 的 Docker 镜像地址和下载状态。镜像包含推理程序及依赖，不包含模型权重；部署前需下载到服务器。',runtimes:'管理基础参数与高级参数，按需添加受校验的扩展选项；参数方案需与推理引擎镜像一致。',gateways:'为客户端提供统一的 HTTPS 模型访问入口，并通过工作区 API Key 验证身份。',workspaces:'配置客户端使用的企业网关和独立 API Key，可单独撤销访问权限，并导出客户端连接配置。',environment:'查看显卡、内存、磁盘和软件依赖的检测结果；镜像下载在“推理引擎镜像”，模型文件下载在“模型权重”。',tasks:'每次操作的状态、日志与当时使用的配置快照。',reports:'查看真实接口验收结果与发布记录。'};
-const actionNames={services_start:'准备网关服务',services_stop:'停止全部访问服务',management_start:'启用控制台 HTTPS',management_stop:'关闭控制台 HTTPS',start:'启动模型服务',redeploy:'重新部署',stop:'停止模型服务',download:'下载权重',pull_image:'下载推理引擎镜像',certificate:'校验证书 / 生成测试证书',gateway_start:'启动网关',gateway_apply:'应用更改',gateway_stop:'停止网关',verify:'测试连接',publish:'验收并记录发布版本',prepare:'安装 NVIDIA 容器工具',repair_toolkit:'修复 Docker GPU 配置',verify_gpu:'验证 GPU 容器访问'};
+const actionNames={services_start:'准备网关服务',services_stop:'停止全部访问服务',management_start:'启用控制台 HTTPS',management_stop:'关闭控制台 HTTPS',start:'启动模型服务',redeploy:'重新部署',stop:'停止模型服务',download:'下载权重',pull_image:'下载推理引擎镜像',certificate:'校验证书 / 生成测试证书',gateway_start:'启动网关',gateway_apply:'使新配置生效（无需重启）',gateway_stop:'停止网关',verify:'测试连接',publish:'验收并记录发布版本',prepare:'安装 NVIDIA 容器工具',repair_toolkit:'修复 Docker GPU 配置',verify_gpu:'验证 GPU 容器访问'};
 const states={running:'执行中',succeeded:'成功',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
 const engineNames={vllm:'vLLM',sglang:'SGLang',llama_cpu:'llama.cpp（CPU 测试）'};
 const engineName=value=>engineNames[value]||'未选择推理引擎';
@@ -171,7 +171,7 @@ $('certificate-form').onsubmit=async e=>{
  if(data.intermediates){data.certificate+='\n'+data.intermediates;delete data.intermediates;}if(data.certificate.length>65536)throw Error('合并后的证书链不能超过 64 KiB');
  if(!imported){if(!certificateRequest?.request_id)throw Error('请先生成 CSR 或选择导入已有私钥');data.request_id=certificateRequest.request_id;}
  const result=await api(`/gateways/${target.id}/certificate`,{method:'POST',body:JSON.stringify(data)});target.revision=result.record.revision;
- await load();e.target.reset();renderCsr();const status=await api(`/gateways/${target.id}/certificate`);renderCertificateStatus(status);notice('证书已校验并保存。返回网关详情，按提示应用更改。');
+ await load();e.target.reset();renderCsr();const status=await api(`/gateways/${target.id}/certificate`);renderCertificateStatus(status);notice('证书已校验并保存。返回网关详情，按提示让新证书生效。');
  }catch(error){$('certificate-error').textContent=error.message;}finally{submit.disabled=false;}
 };
 $('certificate-editor').addEventListener('close',()=>{if(view==='gateways'&&detailId)gatewayWorkflow(selection.gateways).catch(e=>gatewayWorkflowError(selection.gateways,e));});
@@ -228,9 +228,9 @@ async function refreshGatewayList(){
  while(rows.length){const row=rows.shift(),id=row.dataset.gatewayId;const state=row.querySelector('.gateway-list-state'),controls=row.querySelector('.gateway-list-controls');
  try{const s=await api(`/gateways/${id}/readiness`);if(!row.isConnected||view!=='gateways'||detailId)continue;const signature=JSON.stringify(s);if(row.dataset.stateSignature===signature)continue;row.dataset.stateSignature=signature;
  const status=document.createElement('strong');status.className='state '+(s.running?'succeeded':'');status.textContent=s.running?'运行中':'未启动';
- const hint=document.createElement('small');hint.className='gateway-list-hint';const blocked=gatewayStartBlock(s);hint.textContent=s.busy?'任务执行中':s.running?(s.impact?.title||(s.changed?'有未应用更改':'配置已生效')):blocked||'可以启动';state.replaceChildren(status,hint);controls.replaceChildren();
+ const hint=document.createElement('small');hint.className='gateway-list-hint';const blocked=gatewayStartBlock(s);hint.textContent=s.busy?'任务执行中':s.running?(s.impact?.title||(s.changed?'有新配置尚未生效':'配置已生效')):blocked||'可以启动';state.replaceChildren(status,hint);controls.replaceChildren();
  const action=button(s.running?'停止网关':'启动网关',()=>submit(s.running?'gateway_stop':'gateway_start','gateways',id));action.disabled=s.running?s.busy:Boolean(blocked);action.title=s.running?'停止入口访问，保留模型、配置和证书':blocked||'按保存的配置启动';action.className=s.running?'quiet danger':'primary';controls.append(action);
- if(s.running&&s.changed&&!s.busy&&s.certificate_ready&&s.model_ready&&s.services_ready){const apply=button(s.online_apply?'应用更改':'重启步骤',()=>s.online_apply?submit('gateway_apply','gateways',id):showView('gateways/'+encodeURIComponent(id)));controls.append(apply);}
+ if(s.running&&s.changed&&!s.busy&&s.certificate_ready&&s.model_ready&&s.services_ready){const apply=button(s.online_apply?'使新配置生效（无需重启）':'重启步骤',()=>s.online_apply?submit('gateway_apply','gateways',id):showView('gateways/'+encodeURIComponent(id)));controls.append(apply);}
  }catch(error){if(!row.isConnected)continue;delete row.dataset.stateSignature;state.textContent='状态未知 · 请重新检查';controls.replaceChildren(button('重新检查',()=>refreshGatewayList()));}
  }
  }));}finally{gatewayListLoading=false;}
@@ -244,7 +244,7 @@ async function gatewayWorkflow(id){
  const signature=JSON.stringify([id,s]);if(signature===gatewayWorkflowSignature&&root.children.length&&$('selected-actions').children.length)return;gatewayWorkflowSignature=signature;
  const header=$('selected-actions');header.replaceChildren(button('编辑入口配置',()=>edit(id)));if(s.certificate_ready)header.append(button('证书管理',()=>openCertificates(id)));
  const cards=document.createElement('div');cards.className='gateway-status-grid';
- for(const [label,value] of [['证书',s.certificate_ready?(s.self_signed?'本地测试证书':'校验通过'):'待配置'],['关联模型',!s.deployment?'未关联':s.model_error?'状态未知':s.model_ready?'运行中':'未运行'],['网关',s.running?'运行中':'未启动'],['配置',s.running?(s.changed?'有未应用更改':'已生效'):'等待启用']]){const card=document.createElement('div');const title=document.createElement('small');title.textContent=label;const strong=document.createElement('strong');strong.textContent=value;card.append(title,strong);cards.append(card);}
+ for(const [label,value] of [['证书',s.certificate_ready?(s.self_signed?'本地测试证书':'校验通过'):'待配置'],['关联模型',!s.deployment?'未关联':s.model_error?'状态未知':s.model_ready?'运行中':'未运行'],['网关',s.running?'运行中':'未启动'],['配置',s.running?(s.changed?'有新配置尚未生效':'已生效'):'等待启用']]){const card=document.createElement('div');const title=document.createElement('small');title.textContent=label;const strong=document.createElement('strong');strong.textContent=value;card.append(title,strong);cards.append(card);}
  let title,description,label,action;
  if(s.busy){title='正在执行任务';description='任务结束后会自动更新状态。';}
  else if(!s.certificate_ready){title=s.impact?.kind==='certificate_reissue'?'需要重新签发证书':'先准备企业证书';description=s.impact?.certificate_message||s.certificate_error||'生成 CSR 交给企业 CA，或导入已有证书和私钥。';label=s.impact?.kind==='certificate_reissue'?'重新申请 / 导入证书':'配置证书';action=()=>openCertificates(id);}
@@ -254,7 +254,7 @@ async function gatewayWorkflow(id){
  else if(!s.model_ready){title='先启动关联模型';description='证书已就绪，模型运行后即可启动网关。';label='前往启动模型';action=()=>showView('deployments/'+encodeURIComponent(s.deployment));}
  else if(!s.services_ready){title='准备网关服务';description='首次使用需要准备 HTTPS 和身份校验服务。';label='准备服务';action=()=>submit('services_start');}
  else if(!s.running){title='准备完成';description='启动后，客户端即可通过此入口调用模型。';label='启动网关';action=()=>submit('gateway_start','gateways',id);}
- else if(s.changed){title=s.impact?.title||'有尚未生效的更改';description=s.impact?.application_message||(s.online_apply?'应用已保存的配置和证书，现有连接允许完成。':'先停止网关，再启动以应用更改；期间客户端访问会中断。');label=s.online_apply?'应用更改':'停止网关以应用更改';action=()=>submit(s.online_apply?'gateway_apply':'gateway_stop','gateways',id);}
+ else if(s.changed){title=s.impact?.title||'有尚未生效的更改';description=s.impact?.application_message||(s.online_apply?'网关继续运行，新请求使用新配置，已有连接允许完成；无需停止再启动网关。':'先停止网关，再重新启动，新配置才会生效；期间客户端访问会中断。');label=s.online_apply?'使新配置生效（无需重启）':'停止网关（之后需重新启动）';action=()=>submit(s.online_apply?'gateway_apply':'gateway_stop','gateways',id);}
  else {title='网关已启动';description='当前配置已生效。可测试鉴权、模型调用和流式响应。';label='测试连接';action=()=>submit('verify','gateways',id);}
  const next=document.createElement('div');next.className='gateway-next';const words=document.createElement('div');const h=document.createElement('h3');h.textContent=title;const p=document.createElement('p');p.textContent=description;words.append(h,p);next.append(words);if(action){const b=button(label,action);b.className='primary';next.append(b);}
  root.replaceChildren(cards,next);if(s.impact){const impact=document.createElement('section');impact.className='gateway-impact';impact.setAttribute('aria-label','配置生效说明');const h=document.createElement('h4');h.textContent=s.impact.title;const cert=document.createElement('p');cert.textContent=s.impact.certificate_message;const application=document.createElement('p');application.textContent=s.impact.application_message;if(s.impact.title!==title)impact.append(h);if(s.impact.certificate_message!==description)impact.append(cert);if(s.impact.application_message!==description)impact.append(application);if(s.impact.model_message){const model=document.createElement('p');model.textContent=s.impact.model_message;impact.append(model);}if(s.impact.changes?.length){const changed=document.createElement('p');changed.textContent='与运行配置不同：'+s.impact.changes.join('、');impact.append(changed);}root.append(impact);}

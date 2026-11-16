@@ -423,7 +423,7 @@ fn gateway_change_plan(
     } else if online {
         (
             "reload",
-            "需要应用更改：点击「应用更改」在线加载，无需重启网关。",
+            "新配置尚未生效：点击「使新配置生效（无需重启）」。网关继续运行，新请求使用新配置，已有连接允许完成；模型服务不受影响。",
         )
     } else {
         (
@@ -436,7 +436,7 @@ fn gateway_change_plan(
         "identity_mismatch" => ("certificate_reissue", "需要重新签发证书", "当前证书未覆盖保存的访问域名 / IP。请按新地址生成 CSR 并签发，或导入已覆盖该地址的证书。"),
         "invalid" => ("certificate_invalid", "需要修复证书", "证书链、有效期或私钥校验未通过。请在证书管理查看原因，重新签发或导入匹配的有效证书。"),
         "invalid_config" => ("invalid_config", "需要修正入口配置", "入口配置不符合当前证书模式，请修改后再启用。"),
-        _ => (application, match application { "reload" => "需要应用更改", "restart" => "需要重启网关", "start" => "启动时生效", _ => "配置已生效" },
+        _ => (application, match application { "reload" => "新配置尚未生效", "restart" => "需要重启网关", "start" => "启动时生效", _ => "配置已生效" },
             if g.config.tls_mode == "enterprise" { "现有证书覆盖当前地址且校验通过，无需重新签发证书。" } else { "本地测试证书在启动时自动准备，无需向 CA 申请。" }),
     };
     json!({"kind":kind,"title":title,"application":application,"application_message":application_message,

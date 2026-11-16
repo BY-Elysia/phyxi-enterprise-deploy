@@ -108,7 +108,7 @@ def main():
                 # UI state matrix is a browser fixture; it makes no claims of running a GPU or gateway.
                 simulated={'certificate_ready':True,'self_signed':False,'deployment':'demo','model_ready':True,'services_ready':True,'running':False,'other_running':False,'changed':False,'online_apply':True,'busy':False}
                 page.route('**/api/gateways/*/readiness',lambda route:route.fulfill(json=simulated))
-                cases=[({},'启动网关'),({'model_ready':False},'前往启动模型'),({'model_ready':True,'services_ready':False},'准备服务'),({'services_ready':True,'running':True,'changed':True},'应用更改'),({'changed':False},'测试连接'),({'changed':True,'online_apply':False},'停止网关以应用更改'),({'busy':True},None),({'busy':False,'other_running':True,'running':False},'返回入口列表')]
+                cases=[({},'启动网关'),({'model_ready':False},'前往启动模型'),({'model_ready':True,'services_ready':False},'准备服务'),({'services_ready':True,'running':True,'changed':True},'使新配置生效（无需重启）'),({'changed':False},'测试连接'),({'changed':True,'online_apply':False},'停止网关（之后需重新启动）'),({'busy':True},None),({'busy':False,'other_running':True,'running':False},'返回入口列表')]
                 for change,label in cases:
                     simulated.update(change);page.reload()
                     expect(page.locator('#gateway-workflow')).to_be_visible()
@@ -119,7 +119,7 @@ def main():
                     assert '其他入口运行中' not in page.locator('#gateway-workflow').inner_text()
                 simulated.update(other_running=False,running=True,changed=True,online_apply=True)
                 page.set_viewport_size({'width':1440,'height':1050});page.reload()
-                expect(page.locator('#gateway-workflow .primary')).to_have_text('应用更改')
+                expect(page.locator('#gateway-workflow .primary')).to_have_text('使新配置生效（无需重启）')
                 page.screenshot(path=str(evidence/'gateway-guided-desktop.png'))
                 page.set_viewport_size({'width':390,'height':844})
                 page.screenshot(path=str(evidence/'gateway-guided-mobile.png'))
@@ -147,10 +147,10 @@ def main():
                 expect(row.locator('.gateway-list-state')).to_contain_text('运行中')
                 assert len(calls)==2 and '/gateway_stop?' in calls[0] and '/gateway_start?' in calls[1]
                 simulated.update(changed=True)
-                page.reload();expect(row.get_by_role('button',name='应用更改',exact=True)).to_be_visible()
+                page.reload();expect(row.get_by_role('button',name='使新配置生效（无需重启）',exact=True)).to_be_visible()
                 page.screenshot(path=str(evidence/'gateway-list-desktop.png'))
-                row.get_by_role('button',name='应用更改',exact=True).click()
-                expect(row.get_by_role('button',name='应用更改',exact=True)).to_have_count(0)
+                row.get_by_role('button',name='使新配置生效（无需重启）',exact=True).click()
+                expect(row.get_by_role('button',name='使新配置生效（无需重启）',exact=True)).to_have_count(0)
                 assert '/gateway_apply?' in calls[-1]
                 simulated.update(running=False,other_running=True)
                 page.reload();expect(row.get_by_role('button',name='启动网关',exact=True)).to_be_disabled()
