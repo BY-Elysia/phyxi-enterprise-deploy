@@ -62,6 +62,7 @@ def main():
             readiness=call('/gateways/gateway/readiness')
             assert not readiness['certificate_ready'] and not readiness['model_ready'] and not readiness['running']
             assert '证书管理' in readiness['certificate_error']
+            assert readiness['impact']['kind']=='certificate_missing'
             count=len(call('/jobs'))
             denied=call('/actions/gateway_start?kind=gateways&id=gateway','POST',expected=400)
             assert '证书管理' in denied['error'] and len(call('/jobs'))==count
@@ -112,13 +113,21 @@ def main():
             assert call('/gateways/gateway/readiness')['certificate_ready']
             cert_path=pathlib.Path(configured['data']['config']['cert_file'])
             assert cert_path.read_text()==valid
-            call('/gateways/gateway/csr','POST',{'revision':configured['revision']})
+            changed=record();changed['data']['config']['domain']='new.example.test'
+            call('/catalog/gateways/gateway','PUT',changed)
+            impact=call('/gateways/gateway/readiness')
+            assert impact['certificate_reason']=='identity_mismatch' and impact['impact']['kind']=='certificate_reissue'
+            reverted=record();reverted['data']['config']['domain']='gateway.example.test'
+            call('/catalog/gateways/gateway','PUT',reverted)
+            assert call('/gateways/gateway/readiness')['impact']['kind']=='start'
+            call('/gateways/gateway/csr','POST',{'revision':record()['revision']})
             upload(body,400)  # Old CSR selection must not silently select the new private key.
             upload({**body,'request_id':'','private_key':private.read_text()})
             # IP-only gateways use IP SAN validation, not DNS hostname matching.
             ip_record=record();ip_record['data']['config']['domain']='127.0.0.1'
             call('/catalog/gateways/gateway','PUT',ip_record)
             assert call('/gateways/gateway/certificate')['valid']
+            covered=call('/gateways/gateway/readiness');assert covered['certificate_ready'] and covered['impact']['kind']=='start'
             call('/gateways/gateway/certificate','POST',{'revision':1,**body},409)
             print('PASS: real RSA CSR/SAN; root/intermediate chain; managed and imported keys; IP SAN; private permissions; auth; stale revision/request; wrong key/domain/purpose, expired/missing-chain/oversized input rejected; failed imports preserve configuration')
         finally:

@@ -154,8 +154,16 @@ impl Gateway {
         execute(c, None, 30).await
     }
     pub async fn validate_certificates(&self, c: &GatewayConfig) -> Result<(), String> {
+        self.validate_certificate_material(c, true).await
+    }
+    // Identity-free checking is used only to explain a failed validation, never to activate TLS.
+    pub(crate) async fn validate_certificate_material(
+        &self,
+        c: &GatewayConfig,
+        identity: bool,
+    ) -> Result<(), String> {
         c.validate()?;
-        self.openssl(vec![
+        let mut args = vec![
             "verify".into(),
             "-CAfile".into(),
             c.ca_file.clone(),
@@ -163,16 +171,20 @@ impl Gateway {
             c.cert_file.clone(),
             "-purpose".into(),
             "sslserver".into(),
-            if c.domain.parse::<std::net::IpAddr>().is_ok() {
-                "-verify_ip"
-            } else {
-                "-verify_hostname"
-            }
-            .into(),
-            c.domain.clone(),
-            c.cert_file.clone(),
-        ])
-        .await?;
+        ];
+        if identity {
+            args.push(
+                if c.domain.parse::<std::net::IpAddr>().is_ok() {
+                    "-verify_ip"
+                } else {
+                    "-verify_hostname"
+                }
+                .into(),
+            );
+            args.push(c.domain.clone());
+        }
+        args.push(c.cert_file.clone());
+        self.openssl(args).await?;
         let a = self
             .openssl(vec![
                 "x509".into(),

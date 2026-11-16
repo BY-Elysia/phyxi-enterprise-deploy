@@ -98,7 +98,7 @@ def main():
     original=call('/catalog')['records']['gateways']['g']
     edited=json.loads(json.dumps(original['data']));edited['config']['allowed_cidrs'].append('192.0.2.0/24')
     put('gateways','g',edited,original['revision'])
-    assert call('/gateways/g/readiness')['changed']
+    changed=call('/gateways/g/readiness');assert changed['changed'] and changed['impact']['application']=='restart' and '允许来源网段' in changed['impact']['changes']
     put('gateways','other',{'deployment':'a','config':g})
     other=call('/gateways/other/readiness');assert other['other_running'] and not other['running']
     call('/catalog/gateways/other','DELETE')
