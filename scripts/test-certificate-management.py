@@ -68,10 +68,11 @@ def main():
             call('/gateways/gateway/csr','POST',{'revision':0},409)
             call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'organization':'bad/CN=other'},400)
             call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'ips':['not-an-ip']},422)
-            call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'organization':'Example Company','ips':['127.0.0.1']})
+            call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'organization':'测试企业','ips':['127.0.0.1']})
             csr = call('/gateways/gateway/csr')
             csr_file = root/'request.csr'
             csr_file.write_text(csr['csr'])
+            assert '测试企业' in openssl('req','-in',csr_file,'-noout','-subject','-nameopt','utf8')
             text = openssl('req','-in',csr_file,'-noout','-text','-verify')
             assert 'DNS:gateway.example.test' in text and 'IP Address:127.0.0.1' in text
             private = state/'certificates'/csr['request_id']/'server.key'

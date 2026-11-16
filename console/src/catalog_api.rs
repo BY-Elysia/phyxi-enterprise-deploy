@@ -395,7 +395,7 @@ pub(crate) async fn csr_create(
         san.extend(body.ips.iter().map(|ip| format!("IP:{ip}")));
         let subject = if body.organization.is_empty() { format!("/CN={domain}") }
             else { format!("/O={}/CN={domain}", body.organization) };
-        a.gateway.openssl(vec!["req".into(), "-new".into(), "-newkey".into(), "rsa:2048".into(),
+        a.gateway.openssl(vec!["req".into(), "-new".into(), "-utf8".into(), "-newkey".into(), "rsa:2048".into(),
             "-nodes".into(), "-sha256".into(), "-keyout".into(), directory.join("server.key").display().to_string(),
             "-out".into(), directory.join("server.csr").display().to_string(), "-subj".into(), subject,
             "-addext".into(), format!("subjectAltName={}", san.join(","))]).await?;

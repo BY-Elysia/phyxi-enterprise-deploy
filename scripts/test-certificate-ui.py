@@ -104,6 +104,8 @@ def main():
                     if label:expect(page.locator('#gateway-workflow .primary')).to_have_text(label)
                     else:expect(page.locator('#gateway-workflow .primary')).to_have_count(0)
                     assert page.locator('#selected-actions .primary').count()==0
+                    assert '→' not in page.locator('#selected-info').inner_text()
+                    assert '其他入口运行中' not in page.locator('#gateway-workflow').inner_text()
                 simulated.update(other_running=False,running=True,changed=True,online_apply=True)
                 page.set_viewport_size({'width':1440,'height':1050});page.reload()
                 expect(page.locator('#gateway-workflow .primary')).to_have_text('应用更改')
