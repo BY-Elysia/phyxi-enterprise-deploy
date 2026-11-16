@@ -70,7 +70,7 @@ def main():
    pending=call('/actions/download','POST')['id']
    for _ in range(50):
     running=next(j for j in call('/jobs') if j['id']==pending)
-    if running.get('progress',{}).get('file_bytes')==5:break
+    if (running.get('progress') or {}).get('file_bytes')==5:break
     time.sleep(.1)
    assert running['status']=='running' and running['progress']['bytes_ready']==5 and running['progress']['bytes_total']==len(b'fixture-gguf'),running
    call('/actions/cancel?job_id='+pending,'POST')
