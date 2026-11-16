@@ -59,6 +59,12 @@ def main():
                 call('/catalog/gateways/'+id, 'PUT', {'revision':0,'name':id,'data':{'deployment':'','config':config}})
             call('/gateways/gateway/csr', authorized=False, expected=401)
             assert call('/gateways/gateway/csr') is None
+            readiness=call('/gateways/gateway/readiness')
+            assert not readiness['certificate_ready'] and not readiness['model_ready'] and not readiness['running']
+            assert '证书管理' in readiness['certificate_error']
+            count=len(call('/jobs'))
+            denied=call('/actions/gateway_start?kind=gateways&id=gateway','POST',expected=400)
+            assert '证书管理' in denied['error'] and len(call('/jobs'))==count
             call('/gateways/gateway/csr','POST',{'revision':0},409)
             call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'organization':'bad/CN=other'},400)
             call('/gateways/gateway/csr','POST',{'revision':record()['revision'],'ips':['not-an-ip']},422)
@@ -102,6 +108,7 @@ def main():
             upload(body)
             configured=record()
             assert call('/gateways/gateway/certificate')['valid']
+            assert call('/gateways/gateway/readiness')['certificate_ready']
             cert_path=pathlib.Path(configured['data']['config']['cert_file'])
             assert cert_path.read_text()==valid
             call('/gateways/gateway/csr','POST',{'revision':configured['revision']})

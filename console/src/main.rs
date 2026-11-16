@@ -163,6 +163,10 @@ fn router(app: App) -> Router {
                 .layer(axum::extract::DefaultBodyLimit::max(220000)),
         )
         .route(
+            "/gateways/{id}/readiness",
+            get(catalog_api::gateway_readiness),
+        )
+        .route(
             "/gateways/{id}/csr",
             get(catalog_api::csr_download).post(catalog_api::csr_create),
         )

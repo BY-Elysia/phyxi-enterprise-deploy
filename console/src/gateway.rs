@@ -85,6 +85,12 @@ impl GatewayConfig {
             return Err("自签测试证书只允许回环地址；企业监听请导入 CA 证书".into());
         }
         if self.tls_mode == "enterprise" {
+            if [&self.cert_file, &self.key_file, &self.ca_file]
+                .iter()
+                .any(|p| p.is_empty())
+            {
+                return Err("尚未配置企业证书，请进入「证书管理」上传并校验证书".into());
+            }
             for p in [&self.cert_file, &self.key_file, &self.ca_file] {
                 if !Path::new(p).is_absolute() {
                     return Err("证书、私钥、CA 必须是服务器绝对路径".into());

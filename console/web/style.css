@@ -33,3 +33,13 @@ label{display:block;font-size:12px;font-weight:500;color:#61718a}input,select{di
 #certificate-editor h3{margin-top:24px;margin-bottom:12px}
 #certificate-editor details{margin:12px 0}
 #certificate-editor .actions{flex-wrap:wrap}
+
+.gateway-status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:24px 0 16px}
+.gateway-status-grid>div{background:#f6f8fc;border:1px solid #e2e8f2;border-radius:10px;padding:18px}
+.gateway-status-grid small{display:block;color:#667896;margin-bottom:8px}
+.gateway-status-grid strong{font-size:15px}
+.gateway-next{display:flex;align-items:center;justify-content:space-between;gap:24px;background:#eef4ff;border:1px solid #d8e4ff;border-radius:12px;padding:24px}
+.gateway-next h3{margin:0 0 8px;font-size:18px}.gateway-next p{margin:0;color:#536988;line-height:1.7}.gateway-next button{flex-shrink:0}
+.gateway-maintenance{margin-top:18px;color:#667896}.gateway-maintenance button{margin:12px 8px 0 0}
+#management-settings select{max-width:620px}
+@media(max-width:700px){.gateway-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.gateway-next{flex-direction:column;align-items:stretch;padding:18px}}

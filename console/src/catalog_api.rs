@@ -206,6 +206,9 @@ pub(crate) async fn resolve_action(
         ) => {
             let profile: catalog::Gateway = cat.data(kind, id)?;
             g = profile.config;
+            if matches!(action, "gateway_start" | "gateway_apply" | "certificate") {
+                g.validate()?;
+            }
             if access::configured() {
                 g.workspace_scope = id.clone();
             }
@@ -284,6 +287,56 @@ pub(crate) async fn model_status(
         .map(|s| artifacts::destination(&a.runtime.data, s))
         .unwrap_or_else(|| std::path::PathBuf::from(m.model_path));
     Ok(Json(artifacts::readiness(&path, m.source.as_ref())))
+}
+
+/// Readiness describes this selected gateway, not the global default draft.
+pub(crate) async fn gateway_readiness(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let cat = catalog::Catalog::load(&a.store)?;
+    let mut gateway: catalog::Gateway = cat.data("gateways", &id)?;
+    let active = a.store.setting("active_gateway")?;
+    let running = a.gateway.running().await?;
+    let owned = running && active["id"].as_str() == Some(id.as_str());
+    let model = a
+        .runtime
+        .status()
+        .await
+        .unwrap_or_else(|error| json!({"state":"unknown","error":error}));
+    let composition = match model["job"].as_str() {
+        Some(job) => a.store.setting(&format!("composition:{job}"))?,
+        None => Value::Null,
+    };
+    let model_ready = model["state"] == "running"
+        && composition["id"].as_str() == Some(gateway.deployment.as_str());
+    let certificate = if gateway.config.tls_mode == "enterprise" {
+        a.gateway.validate_certificates(&gateway.config).await
+    } else {
+        gateway.config.validate()
+    };
+    let services = services::status(&a.runtime).await?;
+    let services_ready = !services::enabled()
+        || services["components"]
+            .as_array()
+            .is_some_and(|c| c.len() == 2 && c.iter().all(|v| v["state"] == "running"));
+    let mut changed =
+        owned && active["data"] != serde_json::to_value(&gateway).map_err(|e| e.to_string())?;
+    if owned && model_ready {
+        if access::configured() {
+            gateway.config.workspace_scope = id.clone();
+        }
+        let config = tasks::active_config(&a.runtime, &a.store).await?;
+        changed |= a.gateway.matches(&gateway.config, &config).await.is_err();
+    }
+    Ok(Json(
+        json!({"running":owned,"other_running":running && !owned,
+        "active_name":active["name"],"model_ready":model_ready,"model_error":model["error"],"deployment":gateway.deployment,
+        "certificate_ready":certificate.is_ok(),"certificate_error":certificate.err(),
+        "self_signed":gateway.config.tls_mode == "self_signed", "services_ready":services_ready,
+        "changed":changed,"online_apply":crate::gateway_container::name().is_some(),
+        "busy":a.gate.try_write().is_err()}),
+    ))
 }
 
 #[derive(Deserialize)]

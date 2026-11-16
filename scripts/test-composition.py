@@ -92,7 +92,19 @@ def main():
    assert call('/catalog')['records']['workspaces']['persistent']['data']['generation']==generation
    call('/catalog/gateways/g','DELETE',expected=400)
    if args.nginx:
-    task('certificate','gateways','g');task('gateway_start','gateways','g');published=task('publish','gateways','g')
+    pending=call('/gateways/g/readiness');assert pending['certificate_ready'] and pending['model_ready'] and not pending['running']
+    task('gateway_start','gateways','g') # Test TLS preparation is automatic.
+    ready=call('/gateways/g/readiness');assert ready['running'] and not ready['changed'] and ready['model_ready']
+    original=call('/catalog')['records']['gateways']['g']
+    edited=json.loads(json.dumps(original['data']));edited['config']['allowed_cidrs'].append('192.0.2.0/24')
+    put('gateways','g',edited,original['revision'])
+    assert call('/gateways/g/readiness')['changed']
+    put('gateways','other',{'deployment':'a','config':g})
+    other=call('/gateways/other/readiness');assert other['other_running'] and not other['running']
+    call('/catalog/gateways/other','DELETE')
+    put('gateways','g',original['data'],original['revision']+1)
+    assert not call('/gateways/g/readiness')['changed']
+    published=task('publish','gateways','g')
     assert published['composition']['dependencies']['deployment']['dependencies']['runtime']['data']['max_model_len']==512
     assert call('/reports')['releases'][0]['composition']==published['composition']
     call('/actions/certificate?kind=gateways&id=g','POST',expected=400)

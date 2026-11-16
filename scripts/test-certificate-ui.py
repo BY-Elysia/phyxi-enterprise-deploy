@@ -40,7 +40,9 @@ def main():
                 assert page.locator('[name=cert_file],[name=key_file],[name=ca_file]').count()==0
                 page.locator('#record-form button[type=submit]').click()
                 expect(page.locator('#editor')).not_to_be_visible()
-                page.get_by_role('button',name='证书管理',exact=True).click()
+                expect(page.locator('#gateway-workflow')).to_contain_text('先准备企业证书')
+                assert page.locator('#gateway-workflow .primary').count()==1
+                page.get_by_role('button',name='配置证书',exact=True).click()
                 expect(page.locator('#csr-status')).to_contain_text('尚未生成 CSR')
                 page.locator('#csr-form [name=organization]').fill('Browser Test Company')
                 page.locator('#csr-form [name=ips]').fill('127.0.0.1')
@@ -57,11 +59,13 @@ def main():
                 page.locator('#certificate-form [name=certificate]').set_input_files(signed)
                 page.locator('#certificate-form [name=ca]').set_input_files(ca)
                 assert not page.locator('#certificate-form [name=private_key]').is_visible()
+                assert page.locator('#certificate-activate,#certificate-apply').count()==0
                 page.locator('#certificate-form button[type=submit]').click()
                 expect(page.locator('#certificate-status')).to_contain_text('当前配置证书校验通过')
                 # Existing-key import errors are visible; valid server key remains on server in normal CSR flow.
                 page.locator('#certificate-mode').select_option('import')
                 expect(page.locator('#certificate-form [name=private_key]')).to_be_visible()
+                expect(page.locator('#csr-section')).not_to_be_visible()
                 page.locator('#certificate-form [name=certificate]').set_input_files(signed)
                 page.locator('#certificate-form [name=ca]').set_input_files(ca)
                 page.locator('#certificate-form [name=private_key]').set_input_files(key)
@@ -88,6 +92,25 @@ def main():
                 page.locator('#certificate-editor').evaluate('(e)=>e.scrollTop=0')
                 page.screenshot(path=str(evidence/'certificates-mobile.png'))
                 assert page.locator('#certificate-editor').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
+                page.locator('#certificate-close').click()
+                expect(page.locator('#gateway-workflow')).to_contain_text('选择要提供服务的模型')
+                # UI state matrix is a browser fixture; it makes no claims of running a GPU or gateway.
+                simulated={'certificate_ready':True,'self_signed':False,'deployment':'demo','model_ready':True,'services_ready':True,'running':False,'other_running':False,'changed':False,'online_apply':True,'busy':False}
+                page.route('**/api/gateways/*/readiness',lambda route:route.fulfill(json=simulated))
+                cases=[({},'启动网关'),({'model_ready':False},'前往启动模型'),({'model_ready':True,'services_ready':False},'准备服务'),({'services_ready':True,'running':True,'changed':True},'应用更改'),({'changed':False},'测试连接'),({'changed':True,'online_apply':False},'停止网关以应用更改'),({'busy':True},None),({'busy':False,'other_running':True,'running':False},'返回入口列表')]
+                for change,label in cases:
+                    simulated.update(change);page.reload()
+                    expect(page.locator('#gateway-workflow')).to_be_visible()
+                    if label:expect(page.locator('#gateway-workflow .primary')).to_have_text(label)
+                    else:expect(page.locator('#gateway-workflow .primary')).to_have_count(0)
+                    assert page.locator('#selected-actions .primary').count()==0
+                simulated.update(other_running=False,running=True,changed=True,online_apply=True)
+                page.set_viewport_size({'width':1440,'height':1050});page.reload()
+                expect(page.locator('#gateway-workflow .primary')).to_have_text('应用更改')
+                page.screenshot(path=str(evidence/'gateway-guided-desktop.png'))
+                page.set_viewport_size({'width':390,'height':844})
+                page.screenshot(path=str(evidence/'gateway-guided-mobile.png'))
+                assert page.locator('#gateway-workflow').evaluate('(e)=>e.scrollWidth<=e.clientWidth+1')
                 assert not errors,errors
                 browser.close()
                 print('PASS: browser creates enterprise draft without paths, generates/downloads CSR, uploads CA-signed certificate, rejects wrong private key, imports existing key, preserves certificate when editing and reloads CSR; desktop/mobile layouts; no JS errors')
