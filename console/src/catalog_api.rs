@@ -94,9 +94,13 @@ pub(crate) async fn workspace_export(
     if !d.model_name.is_empty() {
         m.model_name = d.model_name;
     }
+    w.generation.validate()?;
+    let request = w.generation.request(&m.model_name);
+    let base_url = format!("https://{}:{}/v1", g.config.domain, g.config.port);
+    let opencode_v2 = json!({"$schema":"https://opencode.ai/config.json","model":format!("phyxi/{}",m.model_name),"providers":{"phyxi":{"name":"PhyXi","package":"@opencode/ai/providers/openai-compatible","settings":{"baseURL":base_url,"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name,"body":w.generation}}}}});
     // Export a client template, never the server token or a private key.
     Ok(Json(
-        json!({"workspace":cat.get("workspaces",&id)?.name,"base_url":format!("https://{}:{}/v1",g.config.domain,g.config.port),"model":m.model_name,"credential_env":w.credential_env,"ca_file":g.config.ca_file,"note":"客户端需自行设置凭据环境变量并安装信任证书；这是配置模板，不代表服务已经发布。","opencode":{"provider":{"phyxi":{"npm":"@ai-sdk/openai-compatible","name":"PhyXi","options":{"baseURL":format!("https://{}:{}/v1",g.config.domain,g.config.port),"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name}}}}},"composition":cat.snapshot("workspaces",&id)?}),
+        json!({"format":"phyxi-client-config-v1","generation":w.generation,"request_template":request,"opencode_v2":opencode_v2,"opencode_legacy_note":"opencode 字段保留旧版连接模板，不携带生成预设；请使用 opencode_v2 或 request_template。","workspace":cat.get("workspaces",&id)?.name,"base_url":format!("https://{}:{}/v1",g.config.domain,g.config.port),"model":m.model_name,"credential_env":w.credential_env,"ca_file":g.config.ca_file,"note":"客户端需自行设置凭据环境变量并安装信任证书；这是配置模板，不代表服务已经发布。","opencode":{"provider":{"phyxi":{"npm":"@ai-sdk/openai-compatible","name":"PhyXi","options":{"baseURL":format!("https://{}:{}/v1",g.config.domain,g.config.port),"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name}}}}},"composition":cat.snapshot("workspaces",&id)?}),
     ))
 }
 pub(crate) async fn image_status(

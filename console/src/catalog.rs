@@ -68,6 +68,8 @@ pub struct Gateway {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Workspace {
+    #[serde(default)]
+    pub generation: crate::generation::Generation,
     pub gateway: String,
     pub credential_env: String,
 }
@@ -351,6 +353,7 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
         }
         "workspaces" => {
             let w: Workspace = decode(v.clone())?;
+            w.generation.validate()?;
             if w.credential_env.is_empty()
                 || w.credential_env.len() > 80
                 || !w.credential_env.bytes().enumerate().all(|(i, b)| {

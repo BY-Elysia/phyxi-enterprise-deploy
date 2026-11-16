@@ -15,6 +15,7 @@ mod environment;
 mod executor;
 mod gateway;
 mod gateway_container;
+mod generation;
 mod host_metrics;
 mod host_setup;
 mod image_sources;

@@ -14,9 +14,9 @@ def main():
   d=pathlib.Path(tmp);model=args.model or d/'model.gguf'
   if not args.model:model.write_bytes(b'test')
   llama=args.llama or d/'llama-server'
-  if not args.llama:llama.write_text(contract.FAKE);llama.chmod(0o755)
+  if not args.llama:llama.write_text(contract.FAKE.replace("body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));","body=json.loads(self.rfile.read(int(self.headers['Content-Length'])));pathlib.Path(os.environ['PHYXI_CAPTURE_REQUEST']).write_text(json.dumps(body));"));llama.chmod(0o755)
   docker=d/'docker';docker.write_text("#!/usr/bin/env python3\nimport json,sys\nif 'image' in sys.argv and 'inspect' in sys.argv:print(json.dumps({'Id':'sha256:'+'b'*64,'Architecture':'amd64','Size':1234}))\n");docker.chmod(0o755)
-  http=port();env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(http),PHYXI_ENABLE_HOST_SETUP='0',PHYXI_LLAMA_SERVER=str(llama.resolve()),PHYXI_BAD_RESPONSE=str(d/'bad'),PATH=str(d)+os.pathsep+env['PATH'])
+  http=port();env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(http),PHYXI_ENABLE_HOST_SETUP='0',PHYXI_LLAMA_SERVER=str(llama.resolve()),PHYXI_BAD_RESPONSE=str(d/'bad'),PHYXI_CAPTURE_REQUEST=str(d/'request.json'),PATH=str(d)+os.pathsep+env['PATH'])
   if args.nginx:env['PHYXI_NGINX']=str(args.nginx.resolve())
   log=(d/'console.log').open('w');proc=subprocess.Popen([str(ROOT/'target/debug/phyxi-console')],env=env,stdout=log,stderr=log);token=''
   def call(path,method='GET',data=None,expected=200):
@@ -70,6 +70,26 @@ def main():
    assert any(c['field']=='max_model_len' for c in diff['changes'])
    put('gateways','g',{'deployment':'a','config':g},1)
    client=call('/workspaces/w/export');assert client['model']=='composition-test' and 'env:PHYXI_API_KEY' in json.dumps(client) and token not in json.dumps(client)
+   assert client['generation']=={} and 'temperature' not in client['request_template']
+   generation={'temperature':0,'top_p':0.9,'max_tokens':128,'stop':['\nEND',' end ','结束'],'frequency_penalty':0.2,'presence_penalty':-0.5,'seed':0}
+   workspace={'gateway':'g','credential_env':'PHYXI_API_KEY','generation':generation}
+   for bad in [{'temperature':3},{'top_p':0},{'max_tokens':0},{'max_tokens':1.5},{'stop':['']},{'stop':'text'},{'stop':['1','2','3','4','5']},{'model':'override'}]:
+    put('workspaces','w',{**workspace,'generation':bad},1,400)
+   put('workspaces','w',workspace,1)
+   put('workspaces','w',workspace,1,400)
+   client=call('/workspaces/w/export')
+   assert client['generation']==generation and token not in json.dumps(client)
+   assert client['opencode_v2']['providers']['phyxi']['models']['composition-test']['body']==generation
+   assert client['opencode_v2']['providers']['phyxi']['settings']['apiKey']=='{env:PHYXI_API_KEY}'
+   for key,value in generation.items():assert client['request_template'][key]==value
+   if not args.llama:
+    request=urllib.request.Request(f'http://127.0.0.1:{dep["port"]}/v1/chat/completions',data=json.dumps(client['request_template']).encode(),headers={'Content-Type':'application/json'})
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request) as response:assert json.load(response)['choices']
+    assert json.loads((d/'request.json').read_text())==client['request_template']
+   put('workspaces','persistent',{'gateway':'','credential_env':'OTHER_KEY','generation':generation})
+   put('workspaces','w',{**workspace,'generation':{}},2)
+   cleared=call('/workspaces/w/export');assert cleared['generation']=={} and 'temperature' not in cleared['request_template']
+   assert call('/catalog')['records']['workspaces']['persistent']['data']['generation']==generation
    call('/catalog/gateways/g','DELETE',expected=400)
    if args.nginx:
     task('certificate','gateways','g');task('gateway_start','gateways','g');published=task('publish','gateways','g')
@@ -87,6 +107,7 @@ def main():
    for _ in range(100):
     try:cat=call('/catalog');break
     except OSError:time.sleep(.1)
+   assert cat['records']['workspaces']['persistent']['data']['generation']==generation
    assert cat['records']['runtimes']['advanced']['data']['vllm']==advanced['vllm']
    assert cat['records']['runtimes']['r']['revision']==2 and 'm' not in cat['records']['models']
    print('PASS: independent CRUD, reference protection, optimistic revision checks, composition, ownership, snapshot isolation, workspace export, persistence'+(' and real CPU/TLS publication' if args.llama else ' (protocol fixture)'))

@@ -105,7 +105,7 @@ ssh -N -L 8765:127.0.0.1:8765 用户@服务器
 
 [架构与职责](docs/architecture.md) · [运维](docs/operations.md) · [开发约定](docs/development.md) · [本地验证记录](docs/local-validation.md)
 
-vLLM 支持基础参数、高级参数及受校验的扩展选项，详见 [推理参数配置](docs/vllm-parameters.md)。
+vLLM 支持基础参数、高级参数及受校验的扩展选项，详见 [推理参数配置](docs/vllm-parameters.md)。客户端工作区提供 [每请求生成预设与配置导出](docs/generation-presets.md)。
 
 ## 开发检查
 
