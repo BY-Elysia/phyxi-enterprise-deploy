@@ -58,7 +58,7 @@ def main():
                     page.get_by_role('button', name='移除', exact=True).nth(1).click()
                     page.locator('#record-form button[type=submit]').click()
                     page.locator('#editor').wait_for(state='hidden')
-                    page.locator('#records button', has_text='编辑').click()
+                    page.get_by_role('button',name='编辑配置',exact=True).click()
                     assert page.locator('[data-vllm-key=dtype]').input_value() == json.dumps('bfloat16')
                     assert page.locator('[data-vllm-key=enable-prefix-caching]').input_value() == 'false'
                     assert page.locator('[data-vllm-key=pipeline-parallel-size]').input_value() == '2'

@@ -31,6 +31,7 @@ def main():
      response=page.request.put(base+'/api/catalog/'+kind+'/'+id,headers=headers,data={'name':id,'revision':0,'data':data});assert response.ok,response.text()
     put('models','model-a',{'model_name':'test-model','model_path':'/tmp/fixture','source':None})
     put('runtimes','runtime-a',{'engine':'llama_cpu','max_model_len':512,'max_num_seqs':1,'gpu_memory_utilization':0.5,'tool_parser':'','reasoning_parser':'','verify_tools':False,'verify_images':False})
+    put('images','image-a',{'engine':'vllm','reference':'vllm/vllm-openai:v0.11.0'})
     put('deployments','deploy-a',{'model':'model-a','runtime':'runtime-a','image':'','gpu_uuids':[],'port':18000})
     cfg=page.request.get(base+'/api/gateway',headers=headers).json()['config']
     put('gateways','gateway-a',{'deployment':'deploy-a','config':cfg})
@@ -50,6 +51,16 @@ def main():
     fixture_jobs=[{'id':'job-gateway','action':'gateway_start','status':'failed','step':'fixture failure','created':'2026-11-16T12:00:00Z','composition':{'kind':'gateways','id':'gateway-a','name':'gateway-a'}},{'id':'job-model','action':'start','status':'succeeded','step':'complete','created':'2026-11-16T11:00:00Z','composition':{'kind':'deployments','id':'deploy-a','name':'deploy-a'}}]
     page.route('**/api/jobs',lambda r:r.fulfill(json=fixture_jobs))
     page.route('**/api/jobs/*/events?tail=true',lambda r:r.fulfill(json=[{'message':'fixture task log'}]))
+    # Every catalog View action opens a standalone, reloadable detail route.
+    for kind,id,detail in [('models','model-a','模型权重配置'),('images','image-a','推理引擎镜像配置'),('runtimes','runtime-a','基础参数')]:
+     page.goto(base+'/#'+kind);expect(page.locator('#selection-panel')).not_to_be_visible()
+     page.get_by_role('button',name='查看',exact=True).click();expect(page.locator('#catalog-list')).not_to_be_visible();assert page.url.endswith('/'+id)
+     expect(page.locator('#selection-panel')).to_contain_text(detail);page.reload();expect(page.locator('#selection-panel')).to_contain_text(detail)
+     page.get_by_role('button',name='编辑配置',exact=True).click();page.locator('#record-form [type=submit]').click();expect(page.locator('#editor')).not_to_be_visible();assert page.url.endswith('/'+id)
+     page.locator('#deployment-back').click();expect(page.locator('#catalog-list')).to_be_visible();expect(page.locator('#selection-panel')).not_to_be_visible()
+     page.locator('#records .record-name').click();expect(page.locator('#catalog-list')).not_to_be_visible();page.go_back();expect(page.locator('#catalog-list')).to_be_visible()
+    page.goto(base+'/#images/image-a');page.get_by_role('button',name='编辑配置',exact=True).click();page.locator('#delete-record').click();page.locator('#confirm-accept').click();expect(page.locator('#catalog-list')).to_be_visible();expect(page.locator('#selection-panel')).not_to_be_visible()
+    page.goto(base+'/#runtimes/missing');expect(page.locator('#page-title')).to_have_text('配置不存在');expect(page.locator('#selection-panel')).not_to_be_visible();page.locator('#deployment-back').click();expect(page.locator('#catalog-list')).to_be_visible()
     page.goto(base+'/#gateways');expect(page.locator('#records')).to_contain_text('gateway-a');expect(page.locator('#managed-services')).not_to_be_visible()
     page.get_by_role('button',name='查看',exact=True).click();expect(page.locator('#detail-navigation')).to_be_visible()
     assert page.locator('.gateway-impact:visible,.gateway-maintenance:visible,#progress-log:visible').count()==0
