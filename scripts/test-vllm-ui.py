@@ -100,7 +100,7 @@ def main():
                     page.locator('[name=generation_stop]').fill(json.dumps(stops))
                     page.locator('#record-form button[type=submit]').click()
                     page.locator('#editor').wait_for(state='hidden')
-                    page.locator('#records button',has_text='编辑').click()
+                    page.goto(base+'/#workspaces');page.locator('#records button',has_text='编辑').click()
                     assert page.locator('[name=generation_temperature]').input_value()=='0'
                     assert page.locator('[name=generation_seed]').input_value()=='0'
                     assert json.loads(page.locator('[name=generation_stop]').input_value())==stops
@@ -122,14 +122,14 @@ def main():
                     put('deployments','ui-deploy',{'model':'ui-model','runtime':next(iter(cat['runtimes'])),'image':'','gpu_uuids':[],'port':18000})
                     put('gateways','ui-gateway',{'deployment':'ui-deploy','config':api('/gateway')['config']})
                     w['data']['gateway']='ui-gateway';api('/catalog/workspaces/'+wid,w)
-                    page.reload();page.locator('#records .record-name').click()
+                    page.goto(base+'/#workspaces/'+wid+'/export');page.reload()
                     for label,key in [('导出客户端配置','generation'),('导出 OpenCode V2 配置','providers')]:
                         with page.expect_download() as download:
                             page.get_by_role('button',name=label,exact=True).click()
                         exported=json.loads(pathlib.Path(download.value.path()).read_text())
                         values=exported['generation'] if key=='generation' else exported['providers']['phyxi']['models']['ui-model']['body']
                         assert values['temperature']==0 and values['seed']==0 and values['stop']==stops
-                    page.locator('#records button',has_text='编辑').click()
+                    page.goto(base+'/#workspaces');page.locator('#records button',has_text='编辑').click()
                     page.get_by_role('button',name='清空生成预设').click()
                     page.locator('#record-form button[type=submit]').click()
                     page.locator('#editor').wait_for(state='hidden')
