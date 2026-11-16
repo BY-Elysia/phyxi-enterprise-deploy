@@ -349,7 +349,19 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
             }
         }
         "gateways" => {
-            decode::<Gateway>(v.clone())?.config.validate()?;
+            let mut config = decode::<Gateway>(v.clone())?.config;
+            // An enterprise draft can precede its CSR and signed certificate.
+            // Runtime validation still requires all three real absolute paths.
+            if config.tls_mode == "enterprise"
+                && [&config.cert_file, &config.key_file, &config.ca_file]
+                    .iter()
+                    .all(|p| p.is_empty())
+            {
+                config.cert_file = "/pending".into();
+                config.key_file = "/pending".into();
+                config.ca_file = "/pending".into();
+            }
+            config.validate()?;
         }
         "workspaces" => {
             let w: Workspace = decode(v.clone())?;

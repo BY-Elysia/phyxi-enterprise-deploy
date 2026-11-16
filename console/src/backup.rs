@@ -73,7 +73,7 @@ fn permitted(name: &str) -> bool {
     parts.len() == 3
         && parts[0] == "certificates"
         && uuid::Uuid::parse_str(parts[1]).is_ok()
-        && ["server.pem", "server.key", "ca.pem"].contains(&parts[2])
+        && ["server.pem", "server.key", "ca.pem", "server.csr"].contains(&parts[2])
 }
 fn append(
     builder: &mut tar::Builder<Vec<u8>>,

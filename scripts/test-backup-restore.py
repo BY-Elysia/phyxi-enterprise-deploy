@@ -9,6 +9,8 @@ with tempfile.TemporaryDirectory() as td:
     (state/'access').mkdir();db=sqlite3.connect(state/'access/access.db');db.execute('create table credentials(hash text)');db.execute("insert into credentials values('stored-key-hash')");db.commit();db.close()
     (state/'gateway').mkdir();(state/'gateway/nginx.conf').write_text('old model route');(state/'gateway/active-container.json').write_text('{}')
     (state/'image-sources.json').write_text('{"mode":"direct"}')
+    certdir=state/'certificates'/'11111111-1111-4111-8111-111111111111';certdir.mkdir(parents=True)
+    (certdir/'server.csr').write_text('pending CSR');(certdir/'server.key').write_text('private key fixture')
     password='private-backup-passphrase';archive=base/'snapshot.phyxi'
     def call(op,path,pw=password):return subprocess.run([str(binary),'--'+op,str(path)],input=pw,text=True,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     for lockname in ['server.lock','access/access.lock']:
@@ -29,6 +31,9 @@ with tempfile.TemporaryDirectory() as td:
     db=sqlite3.connect(state/'access/access.db');assert db.execute('select hash from credentials').fetchone()[0]=='stored-key-hash';db.close()
     assert json.loads((state/'image-sources.json').read_text())=={'mode':'direct'}
     assert (state/'owner').read_text()=='persistent-owner'
+    assert (certdir/'server.csr').read_text()=='pending CSR'
+    assert (certdir/'server.key').read_text()=='private key fixture'
+    assert (certdir/'server.key').stat().st_mode & 0o777 == 0o600
     assert not (state/'gateway/active-container.json').exists()
     assert 'old model route' not in (state/'gateway/nginx.conf').read_text()
     assert 'ready' in (state/'gateway/nginx.conf').read_text()

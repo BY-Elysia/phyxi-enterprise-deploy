@@ -158,8 +158,13 @@ fn router(app: App) -> Router {
         )
         .route(
             "/gateways/{id}/certificate",
-            post(catalog_api::certificate_upload)
+            get(catalog_api::certificate_status)
+                .post(catalog_api::certificate_upload)
                 .layer(axum::extract::DefaultBodyLimit::max(220000)),
+        )
+        .route(
+            "/gateways/{id}/csr",
+            get(catalog_api::csr_download).post(catalog_api::csr_create),
         )
         .route(
             "/audit",

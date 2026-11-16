@@ -166,6 +166,9 @@ pub async fn run(
         }
         "gateway_start" => {
             let active = active_config(runtime, &store).await?;
+            if g.tls_mode == "enterprise" {
+                gateway.certificates(g).await?;
+            }
             gateway.start(g, &active).await?;
             store.event(id, "网关启动，下一步执行接口验收")
         }

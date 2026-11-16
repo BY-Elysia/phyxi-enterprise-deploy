@@ -142,7 +142,7 @@ impl Gateway {
     pub fn cert(&self) -> PathBuf {
         self.dir.join("server.pem")
     }
-    async fn openssl(&self, args: Vec<String>) -> Result<String, String> {
+    pub(crate) async fn openssl(&self, args: Vec<String>) -> Result<String, String> {
         let mut c = Command::new("openssl");
         c.args(args);
         execute(c, None, 30).await
@@ -155,7 +155,14 @@ impl Gateway {
             c.ca_file.clone(),
             "-untrusted".into(),
             c.cert_file.clone(),
-            "-verify_hostname".into(),
+            "-purpose".into(),
+            "sslserver".into(),
+            if c.domain.parse::<std::net::IpAddr>().is_ok() {
+                "-verify_ip"
+            } else {
+                "-verify_hostname"
+            }
+            .into(),
             c.domain.clone(),
             c.cert_file.clone(),
         ])
@@ -174,6 +181,8 @@ impl Gateway {
                 "pkey".into(),
                 "-in".into(),
                 c.key_file.clone(),
+                "-passin".into(),
+                "pass:".into(),
                 "-pubout".into(),
             ])
             .await?;
