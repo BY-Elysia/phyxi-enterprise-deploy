@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """No network or GPU: preset metadata, explicit preparation, immutable local image and SGLang contract."""
-import importlib.util,json,os,pathlib,socket,subprocess,tempfile,time,urllib.request,urllib.error
+import importlib.util,json,os,pathlib,platform,socket,subprocess,tempfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def fixture(name):
  spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/name);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -8,7 +8,9 @@ def main():
  smoke=fixture('smoke-console.py');contract=fixture('test-api-contract.py')
  with tempfile.TemporaryDirectory(prefix='phyxi-presets-') as td:
   d=pathlib.Path(td);bins=d/'bin';bins.mkdir();model=d/'model';model.mkdir();(model/'config.json').write_text('{}');(model/'model.safetensors').write_bytes(b'fixture')
-  for name,body in [('docker',smoke.FAKE),('nvidia-smi',smoke.FAKE),('curl',contract.CURL)]:
+  host_arch = 'arm64' if platform.machine().lower() in ('arm64','aarch64') else 'amd64'
+  docker_fixture = smoke.FAKE.replace("'architecture':'amd64'", "'architecture':" + repr(host_arch))
+  for name,body in [('docker',docker_fixture),('nvidia-smi',smoke.FAKE),('curl',contract.CURL)]:
    path=bins/name;path.write_text(body);path.chmod(0o755)
   with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
   env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
@@ -40,6 +42,13 @@ def main():
    call('/image-sources','PUT',sources['config'])
    assert {x['engine'] for x in presets['images']}=={'vllm','sglang'}
    assert any('GLM' in x['name'] for x in presets['models']) and any('Qwen' in x['name'] for x in presets['models'])
+   assert len(presets['models']) >= 20
+   assert {m['brand'] for m in presets['models']} == {'Qwen','GLM','DeepSeek'}
+   assert not (d/'state/models').exists(), 'browsing the model catalog must not download weights'
+   for logo,mime,signature in [('qwen.webp','image/webp',b'RIFF'),('glm.webp','image/webp',b'RIFF'),('deepseek.webp','image/webp',b'RIFF')]:
+    response=urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f'http://127.0.0.1:{port}/brands/{logo}')
+    assert response.headers['Content-Type']==mime and response.read().startswith(signature)
+
    remote={'model_name':'Qwen3-0.6B','model_path':'/unused','source':{'repo':'https://huggingface.co/Qwen/Qwen3-0.6B','revision':'main','file':''}}
    saved=put('models','remote',remote)['record'];assert saved['data']['source']['revision']=='1'*40
    assert not (d/'state/models').exists(),'saving a preset must not download weights'

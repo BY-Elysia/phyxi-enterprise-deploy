@@ -29,8 +29,10 @@
 
 - `GET /api/presets`：只返回推理引擎镜像、模型仓库及下载站点预设，不下载资源。
 - `GET /api/models/{id}/status`：检查本地权重与下载清单是否完整。
+- `GET /api/models/local-paths`：列出权重根目录。传入 `root` 和 `path` 可浏览一层目录及 GGUF 文件。
 - `GET /api/catalog`：读取独立配置库。
 - `PUT /api/catalog/{kind}/{id}`：`{"name":"名称","revision":0,"data":{...}}`；创建修订为 0，更新传读取到的修订号。
+- 从服务器添加已有权重时，PUT 加 `local=true`，提交服务器绝对路径，路径可由浏览接口返回。检测目录配置、权重分片或 GGUF 文件头通过后保存。
 - `DELETE /api/catalog/{kind}/{id}`：被引用或运行中的对象拒绝删除。
 - `GET /api/deployments/{id}/preview`：检查组合并返回最终 Config 和依赖快照。
 - `GET /api/images/{id}/status`：读取本地 Docker 镜像 ID、架构、大小及标签，不启动容器。

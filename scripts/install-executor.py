@@ -7,12 +7,26 @@ p=argparse.ArgumentParser()
 p.add_argument('--data-dir',type=pathlib.Path,required=True)
 p.add_argument('--image',required=True,help='Already imported image ID (sha256:...)')
 p.add_argument('--admin-password-file',type=pathlib.Path,help='Only required for a fresh installation')
+p.add_argument('--model-root',type=pathlib.Path,action='append',help='Additional existing model directory, repeatable. Omit to retain previous roots.')
 a=p.parse_args()
 if os.geteuid()!=0:p.error('Run on the host as root')
 if pathlib.Path('/.dockerenv').exists():p.error('Do not run in a container')
 data=a.data_dir.resolve()
 if not str(data).startswith('/srv/') or any(c in str(data) for c in '\n\r $"\\,:;%'):p.error('Use a simple absolute /srv/ path')
 if len(a.image)!=71 or not a.image.startswith('sha256:') or any(c not in '0123456789abcdef' for c in a.image[7:]):p.error('Immutable image ID required')
+config=pathlib.Path('/etc/phyxi')
+executor_env=config/'executor.env'
+if a.model_root is None:
+    model_roots=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_MODEL_ROOTS=')),'') if executor_env.is_file() else ''
+else:
+    roots=[]
+    for path in a.model_root:
+        if not path.is_absolute():p.error('Additional model roots must be absolute')
+        path=path.resolve()
+        if path==pathlib.Path('/') or not path.is_dir() or any(c in str(path) for c in '\n\r $"\\,:;%'):
+            p.error('Additional model roots must be existing directories with simple absolute paths')
+        roots.append(str(path))
+    model_roots=':'.join(dict.fromkeys(roots))
 root=pathlib.Path(__file__).resolve().parents[1]
 def run(args,**kw):return subprocess.run(args,check=True,**kw)
 def output(args):return subprocess.check_output(args,text=True).strip()
@@ -53,9 +67,10 @@ if existing:run(['docker','stop',name])
 subprocess.run(['systemctl','stop','phyxi-executor'],check=False,stderr=subprocess.DEVNULL)
 if (install/'phyxi-console').exists():shutil.copy2(install/'phyxi-console',install/'phyxi-console.previous')
 (install/'phyxi-console.new').replace(install/'phyxi-console')
-config=pathlib.Path('/etc/phyxi');config.mkdir(mode=0o700,exist_ok=True)
+config.mkdir(mode=0o700,exist_ok=True)
 settings={'PHYXI_ROLE':'executor','PHYXI_STATE_DIR':str(data),'PHYXI_EXECUTOR_SOCKET':'/run/phyxi/executor.sock','PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock','PHYXI_MANAGED_SERVICES':'1','PHYXI_CONTROL_IMAGE':a.image,'PHYXI_GATEWAY_CONTAINER':'phyxi-managed-gateway','PHYXI_ACCESS_URL':'http://127.0.0.1:8766','PHYXI_ACCESS_ADMIN_FILE':str(data/'service-secrets/access.token'),'PHYXI_ENABLE_HOST_SETUP':'1'}
-(config/'executor.env').write_text(''.join(k+'='+v+'\n' for k,v in settings.items()));(config/'executor.env').chmod(0o600)
+if model_roots:settings['PHYXI_MODEL_ROOTS']=model_roots
+executor_env.write_text(''.join(k+'='+v+'\n' for k,v in settings.items()));executor_env.chmod(0o600)
 shutil.copy2(root/'deployment/phyxi-executor.service','/etc/systemd/system/phyxi-executor.service')
 run(['systemctl','daemon-reload']);run(['systemctl','enable','--now','phyxi-executor'])
 import time
