@@ -79,7 +79,7 @@ def main():
    nonlocal proc
    if proc:proc.terminate();proc.wait(timeout=5);proc=None
   try:
-   boot();assert 'PhyXi' in call('/',auth=False)
+   boot();assert 'PhySpace' in call('/',auth=False)
    call('/api/config',auth=False,expected=401);call('/api/actions/start','POST',auth=False,expected=401)
    assert len(call('/api/gpus'))==1
    call('/api/environment',auth=False,expected=401)

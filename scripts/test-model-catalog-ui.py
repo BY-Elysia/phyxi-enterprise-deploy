@@ -122,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             assert page.get_by_role('button', name='查看已添加', exact=True).is_visible()
             page.locator('#model-library-tab').click()
             assert page.locator('#catalog-list').is_visible()
-            assert page.locator('#asset-records .record-name').count() == 1
+            assert page.locator('#records .record-name').count() == 1
             page.locator('#model-discover-tab').click()
             page.locator('#model-search').fill('')
             page.set_viewport_size({'width': 390, 'height': 844})
@@ -148,6 +148,9 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             add.click()
             page.wait_for_function("() => document.querySelector('#editor-error').textContent.includes('缺少权重分片')")
             (model / 'model-00002-of-00002.safetensors').write_bytes(b'fixture shard')
+            page.get_by_role('button', name='输入相对路径', exact=True).click()
+            root_picker.select_option(str(weights))
+            path_input.fill(str(model.relative_to(weights)))
             add.click()
             page.wait_for_selector('#editor', state='hidden')
             endpoint = f'http://127.0.0.1:{port}/api/catalog'

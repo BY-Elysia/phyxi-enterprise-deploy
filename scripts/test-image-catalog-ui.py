@@ -98,7 +98,7 @@ elif 'inspect' in args and identifier in args:
             page.locator('#deployment-back').click()
             page.locator('#image-library-tab').click()
             assert page.locator('#catalog-list').is_visible()
-            assert 'LMDeploy' in page.locator('#asset-records').inner_text()
+            assert 'LMDeploy' in page.locator('#records').inner_text()
             page.locator('#image-discover-tab').click()
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')

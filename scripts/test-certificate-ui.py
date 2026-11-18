@@ -143,7 +143,7 @@ def main():
                 # List controls route to the selected gateway only; network mutations are mocked here.
                 page.set_viewport_size({'width':1440,'height':1050})
                 page.goto(base+'/#gateways')
-                row=page.locator('#records tr').filter(has_text='网关证书浏览器测试')
+                row=page.locator('#records .resource-card').filter(has_text='网关证书浏览器测试')
                 expect(row.locator('.gateway-list-state')).to_contain_text('运行中')
                 expect(row.get_by_role('button',name='停止网关',exact=True)).to_be_enabled()
                 calls=[]
@@ -174,7 +174,7 @@ def main():
                 simulated.update(other_running=False,certificate_ready=False,impact={'kind':'certificate_reissue','title':'需要重新签发证书','application':'start','application_message':'启动时生效','certificate_message':'证书未覆盖新地址','changes':[]})
                 page.reload();expect(row.locator('.gateway-list-state')).to_contain_text('需要重新签发证书')
                 expect(row.get_by_role('button',name='启动网关',exact=True)).to_be_disabled()
-                row.get_by_role('button',name='查看',exact=True).click()
+                row.get_by_role('button',name='查看详情',exact=True).click()
                 expect(page.locator('#gateway-workflow')).to_contain_text('需要重新签发证书')
                 expect(page.locator('#gateway-workflow .primary')).to_have_text('重新申请 / 导入证书')
                 assert not errors,errors

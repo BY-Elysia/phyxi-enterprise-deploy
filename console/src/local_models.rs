@@ -143,12 +143,17 @@ fn local_json(path: &Path) -> Result<Value, String> {
     serde_json::from_slice(&raw).map_err(|_| "模型配置或权重分片索引不是有效 JSON".into())
 }
 
-pub fn check_model(data: &Path, text: &str) -> Result<PathBuf, String> {
+pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBuf, String> {
     let path = Path::new(text);
-    if !path.is_absolute() || !safe_path(path) {
-        return Err("请输入服务器上以 / 开头的绝对路径，请勿使用 ..、逗号或换行".into());
+    if !safe_path(path) {
+        return Err("请输入有效的服务器路径，请勿使用 ..、逗号或换行".into());
     }
-    let path = resolve_path(data, path, true)?;
+    let path = if path.is_absolute() {
+        resolve_path(data, path, true)?
+    } else {
+        let root = selected_root(data, root.ok_or("输入相对路径前，请选择服务器权重根目录")?)?;
+        beneath(&root, path)?
+    };
     if path.extension().is_some_and(|ext| ext == "gguf") && path.is_file() {
         let mut header = [0; 4];
         if fs::File::open(&path)

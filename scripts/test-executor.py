@@ -88,8 +88,13 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         assert call(target,'PUT',record)[0]==400
         record['data']['model_path']='test-model'
         assert call(target,'PUT',record)[0]==400
-        record['data']['model_path']=str(model)
-        status,saved=call(target,'PUT',record)
+        relative=target+'&'+urllib.parse.urlencode({'root':str(weights)})
+        for bad_path in ('..','escape'):
+            record['data']['model_path']=bad_path
+            assert call(relative,'PUT',record)[0]==400
+        record['data']['model_path']='test-model'
+        assert call(target+'&'+urllib.parse.urlencode({'root':str(outside)}),'PUT',record)[0]==400
+        status,saved=call(relative,'PUT',record)
         assert status==200 and saved['record']['data']['model_path']==str(model)
         c.update(image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'],tensor_parallel=1)
         assert call('/api/config','PUT',c)[0]==200

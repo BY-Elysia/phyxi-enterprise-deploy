@@ -27,7 +27,7 @@
 /* Fixed monitoring content uses the desktop viewport, without clipping overflow. */
 .environment-page main{padding-top:20px;padding-bottom:18px}.environment-page .page-heading{margin-bottom:14px}.environment-page .page-heading h1{margin:0}.monitor-navigation{display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid #d7dbe2;margin:0 0 12px}.monitor-navigation .monitor-tabs{border:0;margin:0;flex-shrink:0}.monitor-navigation .monitor-tabs button{padding:12px 0}.monitor-navigation .monitor-toolbar{margin:0}.monitor-host-strip #inspect{margin-left:auto}#environment-view .monitor-host-strip{padding:10px 16px}.monitor-capacity{padding:12px 16px;margin-top:12px}.monitor-capacity>div:first-child{flex-shrink:0}.monitor-capacity .monitor-disk-meter{min-width:0}
 @media(min-width:1100px) and (min-height:640px){
- .environment-page main{height:calc(100dvh - 64px);display:flex;flex-direction:column;gap:0;min-height:0}
+ .environment-page main{height:calc(100dvh - 66px);display:flex;flex-direction:column;gap:0;min-height:0}
  .environment-page .page-heading{flex-shrink:0}.environment-page #environment-view{display:flex;flex-direction:column;flex:1;min-height:0}
  .environment-page .monitor-host-strip,.environment-page .monitor-navigation{flex-shrink:0}
  .environment-page #monitor-metrics{display:flex;flex-direction:column;flex:1;min-height:0}

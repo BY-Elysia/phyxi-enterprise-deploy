@@ -17,6 +17,7 @@ pub(crate) async fn catalog_get(State(a): State<App>) -> Result<Json<Value>> {
 pub(crate) struct SaveOptions {
     #[serde(default)]
     local: bool,
+    root: Option<String>,
 }
 pub(crate) async fn catalog_put(
     State(a): State<App>,
@@ -36,10 +37,12 @@ pub(crate) async fn catalog_put(
             }
             let data = a.runtime.data.clone();
             let input = model.model_path.clone();
-            let path =
-                tokio::task::spawn_blocking(move || local_models::check_model(&data, &input))
-                    .await
-                    .map_err(|e| e.to_string())??;
+            let root = options.root;
+            let path = tokio::task::spawn_blocking(move || {
+                local_models::check_model(&data, &input, root.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())??;
             let basename = if path.is_file() {
                 path.file_stem()
             } else {

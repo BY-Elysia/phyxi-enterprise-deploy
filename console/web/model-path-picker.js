@@ -43,20 +43,28 @@ function mountModelPathPicker(host, api, initialPath) {
 
  let mode='direct',selected='',rootsLoaded=false,loadNumber=0;
  const direct=action('输入绝对路径',()=>setMode('direct'));
+ const relative=action('输入相对路径',()=>setMode('relative'));
  const browse=action('浏览服务器文件',()=>setMode('browse'));
- methods.append(direct,browse);
+ methods.append(direct,relative,browse);
  picker.append(methods,pathLabel,browser);
  host.append(picker);
 
  function setMode(next) {
   mode=next;
   const browsing=mode==='browse';
-  direct.setAttribute('aria-pressed',String(!browsing));
+  direct.setAttribute('aria-pressed',String(mode==='direct'));
+  relative.setAttribute('aria-pressed',String(mode==='relative'));
   browse.setAttribute('aria-pressed',String(browsing));
   pathLabel.hidden=browsing;
   input.disabled=browsing;
-  browser.hidden=!browsing;
-  if(browsing&&!rootsLoaded)loadRoots();
+  pathLabel.firstChild.textContent=mode==='relative'?'服务器相对路径':'服务器绝对路径';
+  input.placeholder=mode==='relative'?'例如 Qwen/Qwen3-8B':'粘贴以 / 开头的模型目录或 GGUF 文件路径';
+  browser.hidden=mode==='direct';
+  listing.hidden=!browsing;
+  if(mode!=='direct'&&!rootsLoaded)loadRoots();
+  else if(mode==='relative')status.textContent='相对路径以选定的根目录为基准。';
+  else if(browsing&&root.value)loadDirectory();
+  else if(browsing)status.textContent='请选择要浏览的根目录。';
  }
 
  async function loadRoots() {
@@ -75,7 +83,8 @@ function mountModelPathPicker(host, api, initialPath) {
     root.append(option);
    }
    root.disabled=!result.roots.some(item=>item.available);
-   status.textContent=root.disabled?'暂无可浏览的权重目录，请联系管理员配置。':'请选择要浏览的根目录。';
+   status.textContent=root.disabled?'暂无可用的权重根目录，请联系管理员配置。':
+    mode==='relative'?'相对路径以选定的根目录为基准。':'请选择要浏览的根目录。';
   }catch(error){
    if(!picker.isConnected||request!==loadNumber)return;
    status.textContent=error.message;
@@ -129,7 +138,7 @@ function mountModelPathPicker(host, api, initialPath) {
 
  root.onchange=()=>{
   selected='';
-  loadDirectory();
+  if(mode==='browse')loadDirectory();
  };
  setMode(mode);
 
@@ -137,11 +146,16 @@ function mountModelPathPicker(host, api, initialPath) {
   read(){
    if(mode==='browse'){
     if(!selected)throw Error('请在服务器上选择模型目录或 GGUF 文件');
-    return selected;
+    return {path:selected};
    }
    const path=input.value.trim();
+   if(mode==='relative'){
+    if(!root.value)throw Error('输入相对路径前，请选择服务器权重根目录');
+    if(!path||path.startsWith('/'))throw Error('请输入不以 / 开头的相对路径');
+    return {path,root:root.value};
+   }
    if(!path.startsWith('/'))throw Error('请输入服务器上以 / 开头的绝对路径');
-   return path;
+   return {path};
   },
  };
 }
