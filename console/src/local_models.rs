@@ -52,9 +52,11 @@ fn authorized_path(data: &Path, path: &Path, store: &Store) -> Result<(PathBuf, 
     if configured_path(data, &resolved) {
         return Ok((resolved, true));
     }
-    if model_storage::model_location(data, &resolved)
-        && Catalog::load(store)?.model_path_registered(&resolved)
-    {
+    if model_storage::model_location(data, &resolved) && {
+        let saved = store.config()?;
+        Catalog::load(store)?.model_path_registered(&resolved)
+            || (saved.source.is_some() && Path::new(&saved.model_path) == resolved)
+    } {
         return Ok((resolved, false));
     }
     Err("模型路径未授权，请在模型权重页面检测并添加".into())

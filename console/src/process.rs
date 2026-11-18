@@ -47,6 +47,8 @@ impl Managed {
                 let mut cmd = Command::new("/usr/bin/systemctl");
                 cmd.args(["stop", unit]);
                 execute(cmd, None, 30).await?;
+                self.child.wait().await.map_err(|e| e.to_string())?;
+                return Ok(());
             } else if !self.config.native_binary.is_empty() {
                 if let Some(pid) = self.child.id() {
                     unsafe {

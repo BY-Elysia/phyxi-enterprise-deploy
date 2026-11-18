@@ -5,6 +5,7 @@ Docker and driver must already exist. No model, Nginx or Toolkit is installed he
 import argparse, grp, json, os, pathlib, shutil, subprocess
 p=argparse.ArgumentParser()
 p.add_argument('--data-dir',type=pathlib.Path,required=True)
+p.add_argument('--download-dir',type=pathlib.Path,help='Default directory for new weight downloads; preserve on upgrade when omitted')
 p.add_argument('--image',required=True,help='Already imported image ID (sha256:...)')
 p.add_argument('--admin-password-file',type=pathlib.Path,help='Only required for a fresh installation')
 p.add_argument('--vllm-bin',type=pathlib.Path,action='append',help='Host vLLM executable, repeatable; preserve on upgrade when omitted')
@@ -20,6 +21,12 @@ for binary in a.vllm_bin or []:
         p.error('Supply an existing absolute bin/vllm executable')
 config=pathlib.Path('/etc/phyxi')
 executor_env=config/'executor.env'
+prior_settings=dict(line.split('=',1) for line in executor_env.read_text().splitlines() if '=' in line) if executor_env.exists() else {}
+download_dir=prior_settings.get('PHYXI_DOWNLOAD_DIR','')
+if a.download_dir is not None:
+    if not a.download_dir.is_absolute() or not a.download_dir.is_dir():p.error('Download directory must be an existing absolute directory')
+    download_dir=str(a.download_dir.resolve())
+    if any(c in download_dir for c in '\n\r $"\\,:;%'):p.error('Unsupported download directory characters')
 if a.model_root is None:
     model_roots=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_MODEL_ROOTS=')),'') if executor_env.is_file() else ''
 else:
@@ -50,6 +57,11 @@ try:
 except KeyError:
     try:grp.getgrgid(10001);p.error('GID 10001 belongs to another group')
     except KeyError:run(['groupadd','--gid','10001','--system','phyxi-console'])
+# A dedicated group grants native workers read access only to platform-owned weights.
+try:model_gid=grp.getgrnam('phyxi-model-read').gr_gid
+except KeyError:
+    run(['groupadd','--system','phyxi-model-read'])
+    model_gid=grp.getgrnam('phyxi-model-read').gr_gid
 install=pathlib.Path('/opt/phyxi-executor');install.mkdir(mode=0o755,exist_ok=True)
 cid=output(['docker','create','--network','none',a.image])
 try:run(['docker','cp',cid+':/usr/local/bin/phyxi-console',str(install/'phyxi-console.new')])
@@ -76,7 +88,9 @@ settings={'PHYXI_ROLE':'executor','PHYXI_STATE_DIR':str(data),'PHYXI_EXECUTOR_SO
 vllm_bins=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_VLLM_BIN=')),'') if executor_env.exists() else ''
 if a.vllm_bin:
     vllm_bins=':'.join(str(path) for path in a.vllm_bin)
+settings['PHYXI_WEIGHT_READER_GID']=str(model_gid)
 if vllm_bins:settings['PHYXI_VLLM_BIN']=vllm_bins
+if download_dir:settings['PHYXI_DOWNLOAD_DIR']=download_dir
 if model_roots:settings['PHYXI_MODEL_ROOTS']=model_roots
 executor_env.write_text(''.join(k+'='+v+'\n' for k,v in settings.items()));executor_env.chmod(0o600)
 shutil.copy2(root/'deployment/phyxi-executor.service','/etc/systemd/system/phyxi-executor.service')

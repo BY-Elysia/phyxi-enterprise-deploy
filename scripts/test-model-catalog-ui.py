@@ -76,6 +76,15 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             assert page.locator('.model-card').count() == 9
             assert page.locator('#catalog-list').is_hidden()
             page.wait_for_function("() => [...document.querySelectorAll('.model-card img')].every(i=>i.complete&&i.naturalWidth>0)")
+            download_root=state.parent/'download-volume'
+            download_root.mkdir()
+            storage_url=f'http://127.0.0.1:{port}/api/download-storage'
+            headers={'Authorization':'Bearer '+token}
+            page.locator('#storage-open').click()
+            page.locator('#download-directory').fill(str(download_root))
+            page.locator('#download-storage-form [type=submit]').click()
+            page.locator('#download-storage-dialog').wait_for(state='hidden')
+            assert page.request.get(storage_url,headers=headers).json()['path']==str(download_root.resolve())
             assert not (state / 'models').exists()
             page.wait_for_function("() => document.querySelector('#live-state').dataset.state")
             if args.screenshots:
@@ -117,14 +126,17 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             saved = page.request.get(f'http://127.0.0.1:{port}/api/catalog', headers={'Authorization': 'Bearer ' + token}).json()
             record = next(iter(saved['records']['models'].values()))
             assert record['data']['source']['revision'] == '1' * 40
+            assert Path(record['data']['model_path']).is_relative_to(download_root.resolve())
+            assert page.request.put(storage_url,headers=headers,data={'path':''}).ok
             page.get_by_role('button', name='下载权重', exact=True).click()
+            page.locator('#confirm-accept').click()
             for _ in range(100):
                 jobs = page.request.get(f'http://127.0.0.1:{port}/api/jobs', headers={'Authorization': 'Bearer ' + token}).json()
                 if jobs and jobs[0]['status'] != 'running':
                     break
                 time.sleep(.1)
             assert jobs[0]['status'] == 'succeeded', jobs
-            assert (state / 'models').exists()
+            assert list(download_root.rglob('phyxi-manifest.json'))
             page.locator('#deployment-back').click()
             assert page.get_by_role('button', name='查看已添加', exact=True).is_visible()
             page.locator('#model-library-tab').click()

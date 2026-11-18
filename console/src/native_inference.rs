@@ -104,6 +104,23 @@ pub async fn probe(port: u16, expected: &str) -> Result<Value, String> {
     Ok(json!({"model":expected,"url":format!("http://127.0.0.1:{port}/v1"),"available":true}))
 }
 
+pub fn weight_group() -> Result<Option<u32>, String> {
+    if !crate::executor::enabled() {
+        return Ok(None);
+    }
+    std::env::var("PHYXI_WEIGHT_READER_GID")
+        .ok()
+        .map(|s| s.parse().map_err(|_| "模型读取组配置无效".into()))
+        .transpose()
+}
+
+struct ModelLink(PathBuf);
+impl Drop for ModelLink {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 pub async fn start(
     r: &Runtime,
     c: &Config,
@@ -117,11 +134,26 @@ pub async fn start(
         .map_err(|_| "模型端口被占用")?;
     let unit = format!("phyxi-vllm-{id}.service");
     let privileged = unsafe { libc::geteuid() } == 0;
+    let mut model_path = c.model_path.clone();
+    let mut model_link = None;
     let mut cmd = if privileged {
         if !cfg!(target_os = "linux") || !crate::executor::enabled() {
             return Err("以 root 运行原生 vLLM 需要 Linux 宿主机执行器".into());
         }
+        // The private mount exposes only the chosen directory, even if its parents are private.
+        let link = PathBuf::from(format!("/run/phyxi/model-{id}"));
+        std::os::unix::fs::symlink(&c.model_path, &link).map_err(|e| e.to_string())?;
+        model_link = Some(ModelLink(link.clone()));
+        model_path = format!("/run/phyxi-vllm-{id}/model");
         let mut run = Command::new("/usr/bin/systemd-run");
+        if weight_group()?.is_some() {
+            run.arg("--property=SupplementaryGroups=phyxi-model-read");
+        }
+        run.arg(format!(
+            "--property=BindReadOnlyPaths={}:{}",
+            link.display(),
+            model_path
+        ));
         run.args([
             "--wait",
             "--pipe",
@@ -153,12 +185,7 @@ pub async fn start(
             .env("TRANSFORMERS_OFFLINE", "1");
         cmd
     };
-    cmd.args(crate::vllm::serve_args(
-        c,
-        &c.model_path,
-        "127.0.0.1",
-        c.port,
-    ));
+    cmd.args(crate::vllm::serve_args(c, &model_path, "127.0.0.1", c.port));
     let log = r.data.join("local-model.log");
     let file = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     drop(listener);
@@ -196,6 +223,7 @@ pub async fn start(
             break "原生 vLLM 已退出，请查看运行日志及程序、权重读取权限";
         }
         if probe(c.port, &c.model_name).await.is_ok() {
+            drop(model_link);
             store.event(id, "原生 vLLM 已返回所选模型")?;
             return Ok(());
         }

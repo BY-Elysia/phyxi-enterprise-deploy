@@ -217,7 +217,10 @@ impl Catalog {
             String::new()
         };
         let path = match &m.source {
-            Some(s) => crate::artifacts::destination(root, s).display().to_string(),
+            Some(s) if m.model_path.is_empty() => {
+                crate::artifacts::destination(root, s).display().to_string()
+            }
+            Some(_) => m.model_path,
             None => m.model_path,
         };
         let c = Config {

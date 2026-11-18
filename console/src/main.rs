@@ -11,6 +11,7 @@ use catalog_api::{
 };
 mod config;
 mod download_progress;
+mod download_storage;
 mod environment;
 mod executor;
 mod gateway;
@@ -139,6 +140,14 @@ fn router(app: App) -> Router {
                     json!({"models":native_inference::models(port).await?}),
                 ))
             }),
+        )
+        .route(
+            "/models/{id}/download-preview",
+            get(catalog_api::download_preview),
+        )
+        .route(
+            "/download-storage",
+            get(download_storage::info).put(download_storage::save),
         )
         .route(
             "/image-sources",
@@ -390,7 +399,7 @@ async fn config_get(State(a): State<App>) -> Result<Json<Config>> {
 async fn config_save(State(a): State<App>, Json(mut c): Json<Config>) -> Result<Json<Value>> {
     if let Some(source) = &c.source {
         source.validate()?;
-        c.model_path = artifacts::destination(&a.runtime.data, source)
+        c.model_path = download_storage::target(&download_storage::selected(&a)?, source)
             .display()
             .to_string();
     }
@@ -487,8 +496,10 @@ async fn action(
         "pull_image" => vec![format!("image:{}", sources.resolve(&c.image)?)],
         "download" => {
             let path = if let Some(mut source) = c.source.clone() {
+                let directory =
+                    download_storage::root_for(std::path::Path::new(&c.model_path), &source)?;
                 source.file.clear();
-                artifacts::destination(&a.runtime.data, &source)
+                download_storage::target(&directory, &source)
                     .display()
                     .to_string()
             } else {

@@ -198,6 +198,39 @@ pub fn readiness(path: &Path, source: Option<&Source>) -> Value {
     });
     json!({"ready":local&&downloaded,"path":path,"detail":if local&&downloaded{"本地文件已准备，可进入部署；模型兼容性以启动验收为准"}else{"权重尚未准备完整，请先下载或提供完整本地模型路径"}})
 }
+pub async fn metadata(s: &Source) -> Result<Value, String> {
+    let base = source_endpoint(s)?;
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--max-time",
+        "60",
+        &format!(
+            "{base}/api/models/{}/revision/{}?blobs=true",
+            s.repo, s.revision
+        ),
+    ]);
+    let metadata = execute(cmd, None, 65).await?;
+    let meta: Value = serde_json::from_str(&metadata).map_err(|e| e.to_string())?;
+    if meta["sha"].as_str() != Some(s.revision.as_str()) {
+        return Err("仓库返回的 revision 不匹配".into());
+    }
+    Ok(meta)
+}
+pub fn estimate(meta: &Value, s: &Source) -> Option<u64> {
+    meta["siblings"]
+        .as_array()?
+        .iter()
+        .filter(|f| {
+            f["rfilename"]
+                .as_str()
+                .is_some_and(|n| safe_file(n) && (s.file.is_empty() || s.file == n))
+        })
+        .try_fold(0u64, |sum, f| sum.checked_add(file_size(f)?))
+}
 pub async fn download(
     data: &Path,
     c: &Config,
@@ -217,30 +250,20 @@ pub async fn download(
         id,
         &format!("模型下载源：{base}；仍校验固定 revision 与 LFS SHA256"),
     )?;
-    if Path::new(&c.model_path) != destination(data, s) {
+    let directory = crate::download_storage::root_for(Path::new(&c.model_path), s)?;
+    if directory != data.join("models")
+        && !crate::catalog::Catalog::load(&store)?.model_path_registered(Path::new(&c.model_path))
+        && {
+            let saved = store.config()?;
+            saved.model_path != c.model_path || saved.source.as_ref() != Some(s)
+        }
+    {
         return Err("下载路径与来源不匹配".into());
     }
-    let mut cmd = Command::new("curl");
-    cmd.args([
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--location",
-        "--max-time",
-        "60",
-        &format!(
-            "{base}/api/models/{}/revision/{}?blobs=true",
-            s.repo, s.revision
-        ),
-    ]);
-    let metadata = tokio::select! {
-        result=execute(cmd,None,65)=>result?,
+    let meta = tokio::select! {
+        result=metadata(s)=>result?,
         _=wait_cancel(&cancel)=>return Err("任务已取消".into()),
     };
-    let meta: Value = serde_json::from_str(&metadata).map_err(|e| e.to_string())?;
-    if meta["sha"].as_str() != Some(s.revision.as_str()) {
-        return Err("仓库返回的 revision 不匹配".into());
-    }
     let files: Vec<_> = meta["siblings"]
         .as_array()
         .ok_or("缺少模型文件清单")?
@@ -254,11 +277,34 @@ pub async fn download(
     if files.is_empty() || files.len() > 512 {
         return Err("下载文件数量无效（最多512）".into());
     }
-    let root = data
-        .join("models")
-        .join(s.repo.replace('/', "--"))
-        .join(&s.revision);
-    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let root = directory.join(s.repo.replace('/', "--")).join(&s.revision);
+    for ancestor in root.ancestors() {
+        if fs::symlink_metadata(ancestor).is_ok_and(|m| m.file_type().is_symlink())
+            && ancestor.starts_with(&directory)
+        {
+            return Err("下载目录含符号链接".into());
+        }
+    }
+    if directory != data.join("models") {
+        if !directory.is_dir() || !crate::model_storage::model_location(data, &directory) {
+            return Err("下载磁盘不可用".into());
+        }
+        crate::download_storage::check_destination(&root)?;
+    }
+    // Only new platform-owned revision directories inherit the native reader group.
+    fs::create_dir_all(root.parent().ok_or("下载根目录无效")?).map_err(|e| e.to_string())?;
+    match fs::create_dir(&root) {
+        Ok(()) => {
+            if let Some(gid) = crate::native_inference::weight_group()? {
+                use std::os::unix::fs::PermissionsExt;
+                std::os::unix::fs::chown(&root, None, Some(gid)).map_err(|e| e.to_string())?;
+                fs::set_permissions(&root, fs::Permissions::from_mode(0o2750))
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && root.is_dir() => {}
+        Err(e) => return Err(e.to_string()),
+    }
     let total = files
         .iter()
         .map(|f| file_size(f))
@@ -272,9 +318,13 @@ pub async fn download(
         }
         let name = f["rfilename"].as_str().unwrap();
         let target = root.join(name);
+        if directory != data.join("models") {
+            crate::download_storage::check_destination(&target)?;
+            crate::download_storage::check_destination(&target.with_extension("phyxi-part"))?;
+        }
         // Refuse symlinks anywhere below the trusted state directory.
         let mut p = target.clone();
-        while p != data {
+        while p != directory {
             if fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
                 return Err("模型目录含符号链接，拒绝下载".into());
             }
@@ -363,6 +413,9 @@ pub async fn download(
         )?;
         completed = completed.saturating_add(size);
         manifest.push(json!({"file":name,"sha256":hash(&target)?,"bytes":fs::metadata(&target).map_err(|e|e.to_string())?.len()}));
+    }
+    if directory != data.join("models") {
+        crate::download_storage::check_destination(&root.join("phyxi-manifest.json"))?;
     }
     fs::write(
         root.join("phyxi-manifest.json"),
