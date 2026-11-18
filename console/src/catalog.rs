@@ -19,6 +19,8 @@ pub struct Record {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Catalog {
     pub records: BTreeMap<String, BTreeMap<String, Record>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    registered_model_paths: BTreeMap<String, String>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +134,14 @@ impl Catalog {
         if is_new && entries.len() >= 100 {
             return Err("每类最多保存 100 份配置".into());
         }
+        if kind == "models"
+            && !self.registered_model_paths.get(id).is_some_and(|path| {
+                record.data["model_path"].as_str() == Some(path.as_str())
+                    && record.data["source"].is_null()
+            })
+        {
+            self.registered_model_paths.remove(id);
+        }
         entries.insert(
             id.into(),
             Record {
@@ -140,6 +150,14 @@ impl Catalog {
             },
         );
         Ok(())
+    }
+    pub fn register_model_path(&mut self, id: &str, path: String) {
+        self.registered_model_paths.insert(id.into(), path);
+    }
+    pub fn model_path_registered(&self, path: &Path) -> bool {
+        self.registered_model_paths
+            .values()
+            .any(|value| Path::new(value) == path)
     }
     fn validate_refs(&self, kind: &str, v: &Value) -> Result<(), String> {
         for (field, target) in refs(kind) {
@@ -161,6 +179,9 @@ impl Catalog {
             }
         }
         self.records.get_mut(kind).unwrap().remove(id);
+        if kind == "models" {
+            self.registered_model_paths.remove(id);
+        }
         Ok(())
     }
     pub fn compose(&self, id: &str, root: &Path) -> Result<Config, String> {

@@ -10,7 +10,7 @@ pub(crate) struct Scope {
 }
 pub(crate) async fn catalog_get(State(a): State<App>) -> Result<Json<Value>> {
     Ok(Json(
-        serde_json::to_value(catalog::Catalog::load(&a.store)?).map_err(|e| e.to_string())?,
+        json!({"records":catalog::Catalog::load(&a.store)?.records}),
     ))
 }
 #[derive(Deserialize)]
@@ -28,6 +28,7 @@ pub(crate) async fn catalog_put(
     if kind == "workspaces" && id.starts_with("system-") {
         return Err("system- 前缀用于系统内部工作区".to_string().into());
     }
+    let mut registered_path = None;
     if kind == "models" {
         let mut model: catalog::Model =
             serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
@@ -38,11 +39,12 @@ pub(crate) async fn catalog_put(
             let data = a.runtime.data.clone();
             let input = model.model_path.clone();
             let root = options.root;
-            let path = tokio::task::spawn_blocking(move || {
+            let checked = tokio::task::spawn_blocking(move || {
                 local_models::check_model(&data, &input, root.as_deref())
             })
             .await
             .map_err(|e| e.to_string())??;
+            let path = checked.path;
             let basename = if path.is_file() {
                 path.file_stem()
             } else {
@@ -67,6 +69,9 @@ pub(crate) async fn catalog_put(
                     .collect();
             }
             model.model_path = path.to_string_lossy().into_owned();
+            if checked.requires_registration {
+                registered_path = Some(model.model_path.clone());
+            }
         } else if let Some(source) = model.source {
             let source = artifacts::resolve(source).await?;
             model.model_path = artifacts::destination(&a.runtime.data, &source)
@@ -92,6 +97,9 @@ pub(crate) async fn catalog_put(
     let _catalog = a.catalog_gate.lock().await;
     let mut cat = catalog::Catalog::load(&a.store)?;
     cat.put(&kind, &id, record)?;
+    if let Some(path) = registered_path {
+        cat.register_model_path(&id, path);
+    }
     cat.save(&a.store)?;
     Ok(Json(json!({"saved":true,"record":cat.get(&kind,&id)?})))
 }
@@ -371,7 +379,19 @@ pub(crate) async fn model_status(
         .as_ref()
         .map(|s| artifacts::destination(&a.runtime.data, s))
         .unwrap_or_else(|| std::path::PathBuf::from(m.model_path));
-    Ok(Json(artifacts::readiness(&path, m.source.as_ref())))
+    let result = tokio::task::spawn_blocking(move || {
+        if executor::enabled() && m.source.is_none() {
+            match local_models::status_path(&a.runtime.data, &path, &a.store) {
+                Ok(path) => artifacts::readiness(&path, None),
+                Err(detail) => json!({"ready":false,"path":path,"detail":detail}),
+            }
+        } else {
+            artifacts::readiness(&path, m.source.as_ref())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(Json(result))
 }
 
 /// Readiness describes this selected gateway, not the global default draft.

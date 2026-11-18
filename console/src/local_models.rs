@@ -1,9 +1,11 @@
+use crate::{catalog::Catalog, model_storage, store::Store};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
     collections::HashSet,
     fs,
-    io::Read,
+    io::{self, Read},
+    os::unix::fs::OpenOptionsExt,
     path::{Component, Path, PathBuf},
 };
 
@@ -29,36 +31,76 @@ fn safe_path(path: &Path) -> bool {
         && !path.components().any(|part| part == Component::ParentDir)
 }
 
-pub fn launch_path(data: &Path, path: &Path) -> Result<PathBuf, String> {
-    resolve_path(data, path, crate::executor::enabled())
-}
-
-fn resolve_path(data: &Path, path: &Path, restrict_roots: bool) -> Result<PathBuf, String> {
+fn existing_path(path: &Path) -> Result<PathBuf, String> {
     let resolved = fs::canonicalize(path).map_err(|_| "模型路径不存在或不可读取")?;
     if !safe_path(&resolved) {
         return Err("模型的实际路径包含不受支持的字符".into());
     }
-    if restrict_roots
-        && !model_roots(data)
-            .iter()
-            .filter_map(|root| fs::canonicalize(root).ok())
-            .filter(|root| root.parent().is_some())
-            .any(|root| resolved.starts_with(root))
+    Ok(resolved)
+}
+
+fn configured_path(data: &Path, path: &Path) -> bool {
+    model_roots(data)
+        .iter()
+        .filter_map(|root| fs::canonicalize(root).ok())
+        .filter(|root| root.parent().is_some())
+        .any(|root| path.starts_with(root))
+}
+
+fn authorized_path(data: &Path, path: &Path, store: &Store) -> Result<(PathBuf, bool), String> {
+    let resolved = existing_path(path)?;
+    if configured_path(data, &resolved) {
+        return Ok((resolved, true));
+    }
+    if model_storage::model_location(data, &resolved)
+        && Catalog::load(store)?.model_path_registered(&resolved)
     {
-        return Err("模型路径不在执行器允许的权重目录内，请使用页面列出的根目录".into());
+        return Ok((resolved, false));
+    }
+    Err("模型路径未授权，请在模型权重页面检测并添加".into())
+}
+
+pub fn status_path(data: &Path, path: &Path, store: &Store) -> Result<PathBuf, String> {
+    authorized_path(data, path, store).map(|(path, _)| path)
+}
+
+pub fn launch_path(data: &Path, path: &Path, store: &Store) -> Result<PathBuf, String> {
+    let (resolved, configured) = authorized_path(data, path, store)?;
+    if !configured {
+        validate_model_contents(data, &resolved, false)?;
     }
     Ok(resolved)
 }
 
-fn selected_root(data: &Path, root: &str) -> Result<PathBuf, String> {
-    let root = Path::new(root);
-    if !model_roots(data).iter().any(|allowed| allowed == root) {
-        return Err("请选择服务器允许的权重根目录".into());
+struct BrowseRoot {
+    path: PathBuf,
+    configured: bool,
+}
+
+fn selected_root(data: &Path, root: &str) -> Result<BrowseRoot, String> {
+    let requested = Path::new(root);
+    if !requested.is_absolute() || !safe_path(requested) {
+        return Err("请输入有效的服务器绝对目录路径".into());
     }
-    fs::canonicalize(root)
-        .ok()
-        .filter(|root| root.is_dir() && root.parent().is_some())
-        .ok_or_else(|| "该权重根目录不存在或不可读取".into())
+    let path = existing_path(requested)?;
+    let configured = configured_path(data, &path);
+    if !path.is_dir() || path.parent().is_none() {
+        return Err("该目录不可浏览".into());
+    }
+    if !configured && !model_storage::model_location(data, &path) {
+        return Err("该位置不属于可浏览的模型存储目录".into());
+    }
+    Ok(BrowseRoot { path, configured })
+}
+
+impl BrowseRoot {
+    fn resolve(&self, data: &Path, path: &Path) -> Result<PathBuf, String> {
+        let path = beneath(&self.path, path)?;
+        if !self.configured && !model_storage::model_location(data, &path) {
+            return Err("该位置不属于可浏览的模型存储目录".into());
+        }
+        Ok(path)
+    }
 }
 
 fn beneath(root: &Path, path: &Path) -> Result<PathBuf, String> {
@@ -79,15 +121,22 @@ pub struct Browse {
 }
 
 pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
-    let roots: Vec<_> = model_roots(data)
-        .into_iter()
-        .map(|path| serde_json::json!({"path":path,"available":path.is_dir()}))
+    let configured = model_roots(data);
+    let roots: Vec<_> = configured
+        .iter()
+        .map(|path| serde_json::json!({"path":path,"available":path.is_dir(),"kind":"configured"}))
+        .chain(
+            model_storage::storage_roots(data)
+                .into_iter()
+                .filter(|path| !configured.contains(path))
+                .map(|path| serde_json::json!({"path":path,"available":true,"kind":"storage"})),
+        )
         .collect();
     let Some(root) = query.root else {
         return Ok(serde_json::json!({"roots":roots,"entries":[]}));
     };
     let root = selected_root(data, &root)?;
-    let path = beneath(&root, Path::new(query.path.as_deref().unwrap_or(".")))?;
+    let path = root.resolve(data, Path::new(query.path.as_deref().unwrap_or(".")))?;
     let mut entries = Vec::new();
     let mut scan_limit_reached = false;
     let directory = fs::read_dir(&path).map_err(|_| "无法读取这个目录")?;
@@ -105,7 +154,7 @@ pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
         else {
             continue;
         };
-        let Ok(target) = beneath(&root, &entry.path()) else {
+        let Ok(target) = root.resolve(data, &entry.path()) else {
             continue;
         };
         let directory = target.is_dir();
@@ -122,15 +171,31 @@ pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
             |(file, name, target)| serde_json::json!({"name":name,"path":target,"directory":!file}),
         )
         .collect();
-    let parent = path.parent().filter(|parent| parent.starts_with(&root));
+    let parent = path
+        .parent()
+        .filter(|parent| parent.starts_with(&root.path));
     Ok(
         serde_json::json!({"roots":roots,"path":path,"parent":parent,"entries":entries,"truncated":truncated}),
     )
 }
 
+fn open_artifact(path: &Path) -> io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not a regular model file",
+        ));
+    }
+    Ok(file)
+}
+
 fn local_json(path: &Path) -> Result<Value, String> {
     const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
-    let mut input = fs::File::open(path)
+    let mut input = open_artifact(path)
         .map_err(|_| "无法读取模型配置或权重分片索引")?
         .take(MAX_JSON_BYTES + 1);
     let mut raw = Vec::new();
@@ -143,33 +208,67 @@ fn local_json(path: &Path) -> Result<Value, String> {
     serde_json::from_slice(&raw).map_err(|_| "模型配置或权重分片索引不是有效 JSON".into())
 }
 
-pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBuf, String> {
+pub struct CheckedModel {
+    pub path: PathBuf,
+    pub requires_registration: bool,
+}
+
+pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<CheckedModel, String> {
     let path = Path::new(text);
     if !safe_path(path) {
         return Err("请输入有效的服务器路径，请勿使用 ..、逗号或换行".into());
     }
     let path = if path.is_absolute() {
-        resolve_path(data, path, true)?
+        existing_path(path)?
     } else {
         let root = selected_root(data, root.ok_or("输入相对路径前，请选择服务器权重根目录")?)?;
-        beneath(&root, path)?
+        root.resolve(data, path)?
+    };
+    let configured = configured_path(data, &path);
+    if !configured
+        && (!model_storage::model_location(data, &path)
+            || path.components().count() < 3
+            || model_storage::storage_roots(data).contains(&path))
+    {
+        return Err("请选择数据盘下的具体模型目录或 GGUF 文件".into());
+    }
+    validate_model_contents(data, &path, configured)?;
+    Ok(CheckedModel {
+        path,
+        requires_registration: !configured,
+    })
+}
+
+fn validate_model_contents(data: &Path, path: &Path, configured: bool) -> Result<(), String> {
+    let artifact = |file: &Path| -> Result<PathBuf, String> {
+        let target = existing_path(file)?;
+        let within_scope = if configured {
+            configured_path(data, &target)
+        } else {
+            target.starts_with(path)
+        };
+        if within_scope {
+            Ok(target)
+        } else {
+            Err("权重文件的实际路径超出模型目录".into())
+        }
     };
     if path.extension().is_some_and(|ext| ext == "gguf") && path.is_file() {
         let mut header = [0; 4];
-        if fs::File::open(&path)
+        if open_artifact(path)
             .and_then(|mut file| file.read_exact(&mut header))
             .is_err()
             || &header != b"GGUF"
         {
             return Err("文件缺少有效的 GGUF 文件头".into());
         }
-        return Ok(path);
+        return Ok(());
     }
     if !path.is_dir() {
         return Err("请选择包含模型权重的目录或一个 GGUF 文件".into());
     }
-    let config = resolve_path(data, &path.join("config.json"), true)
-        .map_err(|_| "模型目录缺少可读取的 config.json")?;
+    let config =
+        artifact(&path.join("config.json")).map_err(|_| "模型目录缺少可读取的 config.json")?;
     if !config.is_file() || !local_json(&config)?.is_object() {
         return Err("模型目录的 config.json 格式无效".into());
     }
@@ -181,7 +280,7 @@ pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBu
         if !index.exists() {
             continue;
         }
-        let index = resolve_path(data, &index, true)?;
+        let index = artifact(&index)?;
         if !index.is_file() {
             return Err("模型权重分片索引无效".into());
         }
@@ -198,7 +297,7 @@ pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBu
                 return Err("模型权重分片路径无效".into());
             }
             if checked.insert(name)
-                && !resolve_path(data, &path.join(shard), true)
+                && !artifact(&path.join(shard))
                     .ok()
                     .and_then(|p| p.metadata().ok())
                     .is_some_and(|meta| meta.is_file() && meta.len() > 0)
@@ -207,13 +306,13 @@ pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBu
             }
         }
     }
-    let has_weights = fs::read_dir(&path).ok().is_some_and(|rows| {
+    let has_weights = fs::read_dir(path).ok().is_some_and(|rows| {
         rows.filter_map(Result::ok).any(|entry| {
             entry
                 .path()
                 .extension()
                 .is_some_and(|ext| ext == "safetensors" || ext == "bin")
-                && resolve_path(data, &entry.path(), true)
+                && artifact(&entry.path())
                     .ok()
                     .and_then(|file| file.metadata().ok())
                     .is_some_and(|meta| meta.is_file() && meta.len() > 0)
@@ -222,5 +321,80 @@ pub fn check_model(data: &Path, text: &str, root: Option<&str>) -> Result<PathBu
     if !has_weights {
         return Err("目录中没有可读取的 .safetensors 或 .bin 权重文件".into());
     }
-    Ok(path)
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn external_directory_requires_an_exact_persisted_model_registration() {
+        let temp =
+            std::env::temp_dir().join(format!("phyxi-model-storage-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&temp).unwrap();
+        let temp = fs::canonicalize(temp).unwrap();
+        let data = temp.join("state");
+        let storage = temp.join("storage");
+        let model = storage.join("valid-model");
+        let adjacent = storage.join("adjacent-model");
+        fs::create_dir(&data).unwrap();
+        for path in [&model, &adjacent] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("config.json"), b"{}").unwrap();
+            fs::write(path.join("model.safetensors"), b"fixture").unwrap();
+        }
+        symlink(&data, storage.join("state-link")).unwrap();
+        let listing = browse(
+            &data,
+            Browse {
+                root: Some(storage.to_str().unwrap().into()),
+                path: None,
+            },
+        )
+        .unwrap();
+        let entries: Vec<_> = listing["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|entry| entry["name"].as_str())
+            .collect();
+        assert_eq!(entries, ["adjacent-model", "valid-model"]);
+
+        let checked = check_model(&data, model.to_str().unwrap(), None).unwrap();
+        assert!(checked.requires_registration);
+        let store = Store::open(&data.join("state.db")).unwrap();
+        let mut catalog = Catalog::default();
+        catalog
+            .put(
+                "models",
+                "verified",
+                crate::catalog::Record {
+                    name: "example".into(),
+                    revision: 0,
+                    data: json!({"model_path":model,"model_name":"example","source":null}),
+                },
+            )
+            .unwrap();
+        catalog.save(&store).unwrap();
+        assert!(launch_path(&data, &model, &store).is_err());
+        catalog.register_model_path("verified", checked.path.to_string_lossy().into_owned());
+        catalog.save(&store).unwrap();
+        assert_eq!(launch_path(&data, &model, &store).unwrap(), model);
+        assert!(launch_path(&data, &adjacent, &store).is_err());
+        fs::remove_file(model.join("model.safetensors")).unwrap();
+        symlink(
+            adjacent.join("model.safetensors"),
+            model.join("model.safetensors"),
+        )
+        .unwrap();
+        assert!(launch_path(&data, &model, &store).is_err());
+        catalog.delete("models", "verified").unwrap();
+        catalog.save(&store).unwrap();
+        assert!(status_path(&data, &model, &store).is_err());
+        drop(store);
+        fs::remove_dir_all(&temp).unwrap();
+    }
 }

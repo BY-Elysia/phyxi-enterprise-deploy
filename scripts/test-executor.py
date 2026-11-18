@@ -96,6 +96,24 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         assert call(target+'&'+urllib.parse.urlencode({'root':str(outside)}),'PUT',record)[0]==400
         status,saved=call(relative,'PUT',record)
         assert status==200 and saved['record']['data']['model_path']==str(model)
+
+        external=outside/'model from data disk'
+        external.mkdir()
+        (external/'config.json').write_text('{}')
+        (external/'model.safetensors').write_bytes(b'fixture')
+        external_browse='/api/models/local-paths?'+urllib.parse.urlencode({'root':str(outside)})
+        status,folder=call(external_browse)
+        assert status==200 and [row['path'] for row in folder['entries']]==[str(external)],folder
+        assert call('/api/models/local-paths?root=%2Fetc')[0]==400
+        external_url='/api/catalog/models/external'
+        external_record={'name':'external','revision':0,'data':{'model_name':'external','model_path':str(external),'source':None}}
+        assert call(external_url,'PUT',external_record)[0]==200
+        assert call('/api/models/external/status')[1]['ready'] is False
+        external_record['revision']=1
+        status,saved=call(external_url+'?local=true','PUT',external_record)
+        assert status==200 and saved['record']['data']['model_path']==str(external)
+        assert call('/api/models/external/status')[1]['ready'] is True
+        assert 'registered_model_paths' not in call('/api/catalog')[1]
         c.update(image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'],tensor_parallel=1)
         assert call('/api/config','PUT',c)[0]==200
         assert call('/api/actions/arbitrary-shell','POST')[0]==404
@@ -124,6 +142,7 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         restored=next(v for v in call('/api/jobs')[1] if v['id']==j['id'])
         assert restored['progress']['layers']['abcdef123456']=='已就绪' and 'pending' not in restored['progress']
         assert call('/api/environment')[1]['executor'] is True
+        assert call('/api/models/external/status')[1]['ready'] is True
         assert call('/api/image-sources')[1]['config']==sources
         status,cancel_job=call('/api/actions/pull_image','POST');assert status==202
         assert call('/api/actions/cancel','POST')[0]==202

@@ -503,8 +503,14 @@ impl Runtime {
         c.validate()?;
         let resolved;
         let c = if crate::executor::enabled() {
-            let path =
-                crate::local_models::launch_path(&self.data, std::path::Path::new(&c.model_path))?;
+            let data = self.data.clone();
+            let path = std::path::PathBuf::from(&c.model_path);
+            let model_store = store.clone();
+            let path = tokio::task::spawn_blocking(move || {
+                crate::local_models::launch_path(&data, &path, &model_store)
+            })
+            .await
+            .map_err(|e| e.to_string())??;
             resolved = Config {
                 model_path: path.to_string_lossy().into_owned(),
                 ..c.clone()

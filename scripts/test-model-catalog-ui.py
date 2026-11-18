@@ -29,6 +29,11 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
     second_root.mkdir()
     gguf = second_root / 'test.gguf'
     gguf.write_bytes(b'GGUFfixture')
+    external = Path(td).resolve() / 'external disk'
+    external.mkdir()
+    other = external / 'shared.gguf'
+    other.write_bytes(b'GGUFfixture')
+    (external / 'unrelated.txt').write_text('fixture')
     model = weights / 'Qwen' / 'Qwen3-1.7B'
     model.mkdir(parents=True)
     (model / 'config.json').write_text('{"model_type":"qwen3"}')
@@ -183,6 +188,26 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             page.wait_for_selector('#editor', state='hidden')
             records = page.request.get(endpoint, headers=headers).json()['records']['models']
             assert any(r['data']['model_path'] == str(gguf) for r in records.values())
+
+            page.locator('#deployment-back').click()
+            page.locator('#model-local').click()
+            page.get_by_role('button', name='浏览服务器文件', exact=True).click()
+            page.get_by_label('打开其他服务器目录').fill(str(external))
+            page.get_by_role('button', name='打开目录', exact=True).click()
+            page.get_by_role('button', name='选择文件 shared.gguf', exact=True).click()
+            assert page.get_by_text('unrelated.txt', exact=True).count() == 0
+            add.click()
+            page.wait_for_selector('#editor', state='hidden')
+            records = page.request.get(endpoint, headers=headers).json()['records']['models']
+            assert any(r['data']['model_path'] == str(other) for r in records.values())
+            assert other.read_bytes() == b'GGUFfixture'
+            page.locator('#deployment-back').click()
+            page.locator('#model-local').click()
+            page.get_by_role('button', name='浏览服务器文件', exact=True).click()
+            recent = root_picker.locator('optgroup[label="最近打开的目录"] option', has_text=str(external))
+            recent.wait_for(state='attached')
+            assert root_picker.input_value() == ''
+            page.locator('#discard-editor').click()
             assert not errors, errors
             browser.close()
         print('PASS: catalog/filter/pagination/logos, preset and custom forms, save without download, pinned revision, explicit fixture download, saved library, mobile layout, absolute path validation, explicit server roots and GGUF selection')

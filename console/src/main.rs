@@ -22,6 +22,7 @@ mod image_sources;
 mod job_control;
 mod local_images;
 mod local_models;
+mod model_storage;
 mod monitor;
 mod presets;
 mod process;
