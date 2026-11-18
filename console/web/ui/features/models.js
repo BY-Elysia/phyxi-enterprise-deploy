@@ -37,7 +37,7 @@ function ModelCard({ model, recordId, formatBytes, onChoose, onOpen }) {
     h('p', { className: 'model-card-backend', title: model.backend_note },
       '后端参考 · ' + model.backend + ' ' + model.backend_reference),
     h('div', { className: 'model-card-footer' },
-      h('a', { href: model.homepage, target: '_blank', rel: 'noopener noreferrer', title: '许可：' + model.license }, '官方模型卡 ↗'),
+      h('a', { href: `https://hf-mirror.com/${model.repo}`, target: '_blank', rel: 'noopener noreferrer', title: '许可：' + model.license }, '镜像站模型卡 ↗'),
       h('button', {
         type: 'button', className: recordId ? 'quiet' : 'model-choose',
         onClick: () => recordId ? onOpen(recordId) : onChoose(model),

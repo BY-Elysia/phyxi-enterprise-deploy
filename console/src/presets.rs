@@ -7,7 +7,7 @@ pub fn list() -> Value {
         .expect("bundled image presets must be valid JSON");
     json!({"vllm_parameters":crate::vllm::schema(),"images":images,
  "models":models,
- "endpoints":[{"name":"Hugging Face 官方","url":"https://huggingface.co"},{"name":"国内镜像 hf-mirror","url":"https://hf-mirror.com"}]})
+ "endpoints":[{"name":"服务器默认（通常为 hf-mirror）","url":""},{"name":"国内镜像 hf-mirror","url":"https://hf-mirror.com"},{"name":"Hugging Face 官方","url":"https://huggingface.co"}]})
 }
 
 #[cfg(test)]

@@ -70,22 +70,6 @@ impl Sources {
         } else {
             format!("library/{hub}")
         };
-        // Only built-in public namespaces use the public default. Custom/private names stay explicit.
-        if ![
-            "library/nginx:",
-            "library/nginx@",
-            "vllm/vllm-openai:",
-            "vllm/vllm-openai@",
-            "lmsysorg/sglang:",
-            "lmsysorg/sglang@",
-            "openmmlab/lmdeploy:",
-            "openmmlab/lmdeploy@",
-        ]
-        .iter()
-        .any(|p| repo.starts_with(p))
-        {
-            return Ok(reference.into());
-        }
         let prefix = if self.mode == "default" {
             "m.daocloud.io/docker.io"
         } else {
@@ -124,7 +108,7 @@ pub fn save(data: &Path, settings: &Sources) -> Result<(), String> {
 pub fn info(data: &Path) -> Result<Value, String> {
     let c = load(data)?;
     Ok(
-        json!({"default_gateway_image":NGINX,"effective_gateway_image":c.resolve(&c.gateway_image)?,"config":c,"note":"默认使用 DaoCloud 公共镜像服务，仅路由 Nginx/vLLM/SGLang 预设。自定义完整仓库地址原样使用；失败不静默切换其他公共源。"}),
+        json!({"default_gateway_image":NGINX,"effective_gateway_image":c.resolve(&c.gateway_image)?,"config":c,"note":"默认使用 DaoCloud 公共镜像服务，用于 Docker Hub 镜像。其他仓库地址原样使用；失败不静默切换其他公共源。"}),
     )
 }
 pub async fn pull(
@@ -196,7 +180,7 @@ pub async fn pull(
 mod tests {
     use super::*;
     #[test]
-    fn routing_is_explicit_and_private_names_are_not_leaked() {
+    fn docker_hub_uses_selected_source_and_other_registries_stay_explicit() {
         let c = Sources::default();
         assert_eq!(
             c.resolve("nginx:1.28-bookworm").unwrap(),
@@ -208,8 +192,7 @@ mod tests {
         );
         for reference in [
             "registry.company.example/ai/vllm:v1",
-            "private-team/secret:v1",
-            "docker.io/private-team/secret:v1",
+            "ghcr.io/team/model:v1",
         ] {
             assert_eq!(c.resolve(reference).unwrap(), reference);
         }
@@ -217,6 +200,12 @@ mod tests {
             c.resolve(NGINX).unwrap(),
             format!("m.daocloud.io/docker.io/library/{NGINX}")
         );
+        for reference in ["team/tool:v1", "docker.io/team/tool:v1"] {
+            assert_eq!(
+                c.resolve(reference).unwrap(),
+                "m.daocloud.io/docker.io/team/tool:v1"
+            );
+        }
         let local = format!("sha256:{}", "a".repeat(64));
         assert_eq!(c.resolve(&local).unwrap(), local);
         let direct = Sources {

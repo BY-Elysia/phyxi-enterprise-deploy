@@ -4,14 +4,14 @@
 
 单服务器不增加 Harbor 或代理容器，不修改 Docker 全局 registry-mirrors。执行器在拉取前显式解析地址；控制台在“推理引擎镜像 → 镜像下载来源”配置。
 
-- 默认：DaoCloud 官方推荐前缀 `m.daocloud.io/docker.io`，只转发公开的 `library/nginx`、`vllm/vllm-openai`、`lmsysorg/sglang` 命名空间。
+- 默认：DaoCloud 官方推荐前缀 `m.daocloud.io/docker.io`，用于全部 Docker Hub 镜像，包括三个推理引擎、网关及自定义 Hub 镜像。私有 Hub 镜像请选择直连或企业代理，默认公共代理会收到所请求的仓库名。
 - 企业仓库代理：填写如 `registry.company.example/dockerhub`；仓库需提前同步所选版本并保留上述路径，不能只提供一个空仓库。私有仓库认证由运维在执行器宿主机的 Docker 配置中准备，界面不收集或显示仓库密码。
 - 直接使用原始地址：适用于网络已开放或自行准备原始地址镜像。
-- 自定义完整地址：推理引擎配置和 Nginx 地址均可填写企业自己的路径，如 `registry.company.example/ai/vllm:approved`。带显式仓库主机的地址原样使用，不再加公共前缀。未列入公开名单的 Docker Hub 命名空间也不转发到公共源。
+- 自定义完整地址：推理引擎配置和 Nginx 地址均可填写企业自己的路径，如 `registry.company.example/ai/vllm:approved`。Docker Hub 以外的显式仓库地址原样使用。
 
 可选手工 Compose 模板使用同一默认 Nginx 地址，运维通过 `PHYXI_NGINX_IMAGE` 覆盖；这些手工模板不读取控制台数据库或 JSON 设置。
 
-工作区鉴权复用已安装控制台镜像，不额外下载第三方鉴权镜像。权重下载和宿主机 apt 源独立，不受此设置影响。
+工作区鉴权复用已安装控制台镜像，不额外下载第三方鉴权镜像。模型权重默认从 hf-mirror.com 获取元数据及权重文件，可通过下载站点或 PHYXI_HF_ENDPOINT 改选官方站。模型仓库链接只标识仓库，所选下载站点决定实际来源。构建控制台的基础镜像也默认走 DaoCloud，可用构建参数 HUB_LIBRARY 改选 docker.io/library 或企业镜像前缀。
 
 保存来源不会下载镜像，也不重启服务；只影响下一次准备与检查。切换来源后按新地址检查本地镜像；导入离线镜像时应保留实际下载地址的标签/摘要，或把镜像配置改为导入的完整地址/不可变 ID。已有 Nginx 容器恢复时沿用其镜像，此设置不自动升级它。
 

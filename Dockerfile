@@ -1,4 +1,5 @@
-FROM rust:1.91-slim-bookworm AS builder
+ARG HUB_LIBRARY=m.daocloud.io/docker.io/library
+FROM ${HUB_LIBRARY}/rust:1.91-slim-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
@@ -10,9 +11,9 @@ RUN mkdir -p console/src && printf 'fn main() {}\n' > console/src/main.rs \
 COPY console ./console
 RUN touch console/src/main.rs && cargo build --release --locked --workspace
 
-FROM docker:28-cli AS dockercli
+FROM ${HUB_LIBRARY}/docker:28-cli AS dockercli
 
-FROM debian:bookworm-slim
+FROM ${HUB_LIBRARY}/debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl nginx openssl procps \
     && rm -rf /var/lib/apt/lists/*

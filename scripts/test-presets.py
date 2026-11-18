@@ -14,6 +14,7 @@ def main():
    path=bins/name;path.write_text(body);path.chmod(0o755)
   with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
   env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
+  env.pop("PHYXI_HF_ENDPOINT",None)
   proc=subprocess.Popen([str(ROOT/'target/debug/phyxi-console')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);token=''
   def call(path,method='GET',data=None,status=200):
    req=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=json.dumps(data).encode() if data is not None else None,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
@@ -51,6 +52,7 @@ def main():
 
    remote={'model_name':'Qwen3-0.6B','model_path':'/unused','source':{'repo':'https://huggingface.co/Qwen/Qwen3-0.6B','revision':'main','file':''}}
    saved=put('models','remote',remote)['record'];assert saved['data']['source']['revision']=='1'*40
+   assert saved['data']['source']['endpoint']=='https://hf-mirror.com'
    assert not (d/'state/models').exists(),'saving a preset must not download weights'
    assert call('/models/remote/status')['ready'] is False
    remote['source']['repo']='https://127.0.0.1/private';put('models','bad',remote,status=400)

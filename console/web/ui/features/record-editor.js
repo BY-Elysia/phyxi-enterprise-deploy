@@ -139,7 +139,7 @@ export function createRecordEditor({
    if(kind==='models')mountLocalModel(data);else mountLocalImages(data);
   }else{
    if(kind==='models')Object.assign(data,{
-    source_repo:data.source?.repo||'',source_endpoint:data.source?.endpoint||'https://huggingface.co',
+    source_repo:data.source?.repo||'',source_endpoint:data.source?.endpoint||'',
     source_revision:data.source?.revision||'main',source_file:data.source?.file||'',
    });
    if(kind==='gateways')data={deployment:data.deployment,...data.config};

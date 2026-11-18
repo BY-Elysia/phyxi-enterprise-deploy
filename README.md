@@ -93,7 +93,7 @@ ssh -N -L 8765:127.0.0.1:8765 用户@服务器
 | `PHYXI_LLAMA_SERVER` | 未启用 | CPU 测试引擎绝对路径 |
 | `PHYXI_NGINX` | `nginx` | 网关程序路径 |
 | `PHYXI_ENABLE_HOST_SETUP` | 未启用 | 设为 1 才开放受控主机准备任务 |
-| `PHYXI_HF_ENDPOINT` | `https://huggingface.co` | 可显式设为 `https://hf-mirror.com`，保持固定 revision 与 LFS SHA256 校验 |
+| `PHYXI_HF_ENDPOINT` | `https://hf-mirror.com` | 可显式设为 `https://huggingface.co`，保持固定 revision 与 LFS SHA256 校验 |
 
 - 保存配置不修改运行实例；模型变更通过“重新部署”有序停止关联网关和旧模型、启动新模型并恢复网关，之后重新验收。当前有停机窗口，无自动切流或回滚。
 - 模型容器必须拥有本状态目录的 owner label；不接管旧 Compose/systemd 或其他平台的实例。CPU/Nginx 只通过当前进程持有的 child handle 停止，不信任磁盘上的 PID。
