@@ -74,9 +74,21 @@ pub(crate) async fn catalog_put(
             }
         } else if let Some(source) = model.source {
             let source = artifacts::resolve(source).await?;
-            model.model_path = artifacts::destination(&a.runtime.data, &source)
+            let previous = catalog::Catalog::load(&a.store)?
+                .data::<catalog::Model>("models", &id)
+                .ok();
+            let root = previous
+                .as_ref()
+                .and_then(|m| {
+                    m.source.as_ref().and_then(|s| {
+                        download_storage::root_for(std::path::Path::new(&m.model_path), s).ok()
+                    })
+                })
+                .unwrap_or(download_storage::selected(&a)?);
+            model.model_path = download_storage::target(&root, &source)
                 .display()
                 .to_string();
+            registered_path = Some(model.model_path.clone());
             model.source = Some(source);
         }
         record.data = serde_json::to_value(model).map_err(|e| e.to_string())?;
@@ -233,9 +245,7 @@ pub(crate) async fn resolve_action(
             source.validate()?;
             Config {
                 model_name: m.model_name,
-                model_path: artifacts::destination(&a.runtime.data, &source)
-                    .display()
-                    .to_string(),
+                model_path: m.model_path,
                 source: Some(source),
                 ..Config::default()
             }
@@ -368,17 +378,24 @@ async fn prepared_config(a: &App, cat: &catalog::Catalog, id: &str) -> Result<Co
     c.validate()?;
     Ok(c)
 }
+pub(crate) async fn download_preview(
+    State(a): State<App>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>> {
+    let m: catalog::Model = catalog::Catalog::load(&a.store)?.data("models", &id)?;
+    let source = m.source.ok_or("没有下载来源".to_string())?;
+    let metadata = artifacts::metadata(&source).await?;
+    Ok(Json(
+        json!({"path":m.model_path,"available_bytes":download_storage::free(std::path::Path::new(&m.model_path)),"estimated_bytes":artifacts::estimate(&metadata,&source)}),
+    ))
+}
 pub(crate) async fn model_status(
     State(a): State<App>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>> {
     let cat = catalog::Catalog::load(&a.store)?;
     let m: catalog::Model = cat.data("models", &id)?;
-    let path = m
-        .source
-        .as_ref()
-        .map(|s| artifacts::destination(&a.runtime.data, s))
-        .unwrap_or_else(|| std::path::PathBuf::from(m.model_path));
+    let path = std::path::PathBuf::from(&m.model_path);
     let result = tokio::task::spawn_blocking(move || {
         if executor::enabled() && m.source.is_none() {
             match local_models::status_path(&a.runtime.data, &path, &a.store) {

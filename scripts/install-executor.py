@@ -5,6 +5,7 @@ Docker and driver must already exist. No model, Nginx or Toolkit is installed he
 import argparse, grp, json, os, pathlib, shutil, subprocess
 p=argparse.ArgumentParser()
 p.add_argument('--data-dir',type=pathlib.Path,required=True)
+p.add_argument('--download-dir',type=pathlib.Path,help='Default directory for new weight downloads; preserve on upgrade when omitted')
 p.add_argument('--image',required=True,help='Already imported image ID (sha256:...)')
 p.add_argument('--admin-password-file',type=pathlib.Path,help='Only required for a fresh installation')
 p.add_argument('--model-root',type=pathlib.Path,action='append',help='Additional existing model directory, repeatable. Omit to retain previous roots.')
@@ -16,6 +17,12 @@ if not str(data).startswith('/srv/') or any(c in str(data) for c in '\n\r $"\\,:
 if len(a.image)!=71 or not a.image.startswith('sha256:') or any(c not in '0123456789abcdef' for c in a.image[7:]):p.error('Immutable image ID required')
 config=pathlib.Path('/etc/phyxi')
 executor_env=config/'executor.env'
+prior_settings=dict(line.split('=',1) for line in executor_env.read_text().splitlines() if '=' in line) if executor_env.exists() else {}
+download_dir=prior_settings.get('PHYXI_DOWNLOAD_DIR','')
+if a.download_dir is not None:
+    if not a.download_dir.is_absolute() or not a.download_dir.is_dir():p.error('Download directory must be an existing absolute directory')
+    download_dir=str(a.download_dir.resolve())
+    if any(c in download_dir for c in '\n\r $"\\,:;%'):p.error('Unsupported download directory characters')
 if a.model_root is None:
     model_roots=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_MODEL_ROOTS=')),'') if executor_env.is_file() else ''
 else:
@@ -69,6 +76,7 @@ if (install/'phyxi-console').exists():shutil.copy2(install/'phyxi-console',insta
 (install/'phyxi-console.new').replace(install/'phyxi-console')
 config.mkdir(mode=0o700,exist_ok=True)
 settings={'PHYXI_ROLE':'executor','PHYXI_STATE_DIR':str(data),'PHYXI_EXECUTOR_SOCKET':'/run/phyxi/executor.sock','PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock','PHYXI_MANAGED_SERVICES':'1','PHYXI_CONTROL_IMAGE':a.image,'PHYXI_GATEWAY_CONTAINER':'phyxi-managed-gateway','PHYXI_ACCESS_URL':'http://127.0.0.1:8766','PHYXI_ACCESS_ADMIN_FILE':str(data/'service-secrets/access.token'),'PHYXI_ENABLE_HOST_SETUP':'1'}
+if download_dir:settings['PHYXI_DOWNLOAD_DIR']=download_dir
 if model_roots:settings['PHYXI_MODEL_ROOTS']=model_roots
 executor_env.write_text(''.join(k+'='+v+'\n' for k,v in settings.items()));executor_env.chmod(0o600)
 shutil.copy2(root/'deployment/phyxi-executor.service','/etc/systemd/system/phyxi-executor.service')
