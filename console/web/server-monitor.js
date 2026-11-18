@@ -1,6 +1,6 @@
 'use strict';
 
-function mountServerMonitor({api, onAction, formatBytes, isActive, isConnected}) {
+export function mountServerMonitor({api, onAction, formatBytes, isActive, isConnected}) {
  const $ = id => document.getElementById(id);
  let monitorData={samples:[],metadata:{}},monitorLoading=false,monitorTab='metrics';
  let gpuMonitorData={samples:[],bucket_seconds:10},gpuMonitorRequest;

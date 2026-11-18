@@ -54,6 +54,44 @@ def main():
     fixture_jobs=[{'id':'job-gateway','action':'gateway_start','status':'failed','step':'fixture failure','created':'2026-11-16T12:00:00Z','composition':{'kind':'gateways','id':'gateway-a','name':'gateway-a'}},{'id':'job-model','action':'start','status':'succeeded','step':'complete','created':'2026-11-16T11:00:00Z','composition':{'kind':'deployments','id':'deploy-a','name':'deploy-a'}}]
     page.route('**/api/jobs',lambda r:r.fulfill(json=fixture_jobs))
     page.route('**/api/jobs/*/events?tail=true',lambda r:r.fulfill(json=[{'message':'fixture task log'}]))
+    # The catalog bundles and history requests only load when their views need them.
+    paths=[]
+    page.on('request',lambda request:paths.append(request.url.removeprefix(base)))
+    page.goto(base+'/#deployments')
+    expect(page.locator('#records')).to_contain_text('deploy-a')
+    expect(page.locator('[data-view=deployments]')).to_have_attribute('aria-current','page')
+    page.wait_for_timeout(3250)
+    assert '/api/status' in paths
+    assert not {'/api/jobs','/api/services','/ui/features/models.js','/ui/features/images.js','/server-monitor.js'} & set(paths),paths
+    page.locator('[data-view=models]').click()
+    expect(page.locator('#model-cards .model-card')).to_have_count(9)
+    assert '/ui/features/models.js' in paths and '/ui/features/images.js' not in paths
+    page.locator('[data-view=images]').click()
+    expect(page.locator('#image-cards .engine-card')).to_have_count(3)
+    assert '/ui/features/images.js' in paths and '/server-monitor.js' not in paths
+
+    bundled=base+'/ui/vendor/react-19.3.1.js'
+    compressed=page.request.get(bundled,headers={'Accept-Encoding':'gzip'})
+    identity=page.request.get(bundled,headers={'Accept-Encoding':'gzip;q=0'})
+    assert compressed.headers['content-encoding']=='gzip'
+    assert 'content-encoding' not in identity.headers
+    assert compressed.text()==identity.text()
+    assert 'immutable' in compressed.headers['cache-control']
+    assert page.request.get(base+'/ui/unknown.js').status==404
+
+    probes=[]
+    def probe(route):
+     probes.append(route.request.method)
+     route.fulfill(json={'ok':True})
+    page.route('**/api/ui-dedupe-probe',probe)
+    page.evaluate("""async () => {
+     const { createApi } = await import('/ui/core/api.js');
+     const api = createApi({ headers: () => ({}), onUnauthorized: () => {} });
+     await Promise.all([api('/ui-dedupe-probe'), api('/ui-dedupe-probe')]);
+     await api('/ui-dedupe-probe');
+    }""")
+    assert probes==['GET','GET'],probes
+
     # Every catalog View action opens a standalone, reloadable detail route.
     for kind,id,detail in [('models','model-a','模型权重配置'),('images','image-a','推理引擎镜像配置'),('runtimes','runtime-a','基础参数')]:
      page.goto(base+'/#'+kind);expect(page.locator('#selection-panel')).not_to_be_visible()

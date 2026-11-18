@@ -155,7 +155,10 @@ elif '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
             assert '已暂停自动刷新' in zoom.locator('#monitor-chart-detail').inner_text()
             assert 'CPU —' in zoom.locator('#monitor-chart-values').inner_text()
             mock['samples'][-1]['cpu_percent']=37
-            page.evaluate('() => serverMonitor.load()')
+            page.wait_for_function("() => !document.querySelector('#inspect').disabled")
+            with page.expect_response('**/api/monitor'):
+                page.evaluate("() => document.querySelector('#inspect').click()")
+            page.get_by_text('CPU 37.0%', exact=True).wait_for()
             assert 'CPU 37.0%' in zoom.locator('#monitor-chart-values').inner_text()
             if args.screenshots:page.screenshot(path=str(args.screenshots/'server-monitor-zoom.png'))
             page.keyboard.press('Escape')

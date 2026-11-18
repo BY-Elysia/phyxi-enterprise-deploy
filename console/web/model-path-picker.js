@@ -1,6 +1,6 @@
 'use strict';
 
-function mountModelPathPicker(host, api, initialPath) {
+export function mountModelPathPicker(host, api, initialPath) {
  const picker=document.createElement('section');
  picker.className='model-path-picker';
  picker.setAttribute('aria-label','服务器权重路径');

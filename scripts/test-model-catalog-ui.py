@@ -92,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             page.locator('#model-search').fill('Qwen3-VL-8B-Instruct')
             assert page.locator('.model-card').count() == 1
             page.get_by_role('button', name='选择模型', exact=True).click()
-            assert page.locator('#editor').is_visible()
+            page.locator('#editor').wait_for(state='visible')
             assert page.locator('[name=source_repo]').input_value() == 'Qwen/Qwen3-VL-8B-Instruct'
             assert page.locator('[name=model_name]').input_value() == 'Qwen3-VL-8B-Instruct'
             assert not (state / 'models').exists()

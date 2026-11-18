@@ -32,6 +32,7 @@ mod store;
 mod tasks;
 mod telemetry;
 mod verification;
+mod web_assets;
 
 use axum::{
     extract::{Path, Query, Request, State},
@@ -288,11 +289,13 @@ fn router(app: App) -> Router {
                 )
             }),
         )
+        .route("/ui/{*path}", get(web_assets::module))
         .nest("/api", api)
         .layer(axum::extract::DefaultBodyLimit::max(16384))
         .layer(middleware::from_fn(|request:Request,next:Next| async move {
             let mut response=next.run(request).await;
-            for (name,value) in [("cache-control","no-store"),("x-content-type-options","nosniff"),("referrer-policy","no-referrer"),("content-security-policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")] {response.headers_mut().insert(axum::http::HeaderName::from_static(name),value.parse().unwrap());}
+            response.headers_mut().entry(header::CACHE_CONTROL).or_insert_with(|| "no-store".parse().unwrap());
+            for (name,value) in [("x-content-type-options","nosniff"),("referrer-policy","no-referrer"),("content-security-policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")] {response.headers_mut().insert(axum::http::HeaderName::from_static(name),value.parse().unwrap());}
             response
         }))
         .with_state(app)
