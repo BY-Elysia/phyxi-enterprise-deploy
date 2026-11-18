@@ -100,7 +100,7 @@ pub(crate) async fn workspace_export(
     let opencode_v2 = json!({"$schema":"https://opencode.ai/config.json","model":format!("phyxi/{}",m.model_name),"providers":{"phyxi":{"name":"PhyXi","package":"@opencode/ai/providers/openai-compatible","settings":{"baseURL":base_url,"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name,"body":w.generation}}}}});
     // Export a client template, never the server token or a private key.
     Ok(Json(
-        json!({"format":"phyxi-client-config-v1","generation":w.generation,"request_template":request,"opencode_v2":opencode_v2,"opencode_legacy_note":"opencode 字段保留旧版连接模板，不携带生成预设；请使用 opencode_v2 或 request_template。","workspace":cat.get("workspaces",&id)?.name,"base_url":format!("https://{}:{}/v1",g.config.domain,g.config.port),"model":m.model_name,"credential_env":w.credential_env,"ca_file":g.config.ca_file,"note":"客户端需自行设置凭据环境变量并安装信任证书；这是配置模板，不代表服务已经发布。","opencode":{"provider":{"phyxi":{"npm":"@ai-sdk/openai-compatible","name":"PhyXi","options":{"baseURL":format!("https://{}:{}/v1",g.config.domain,g.config.port),"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name}}}}},"composition":cat.snapshot("workspaces",&id)?}),
+        json!({"format":"phyxi-client-config-v1","generation":w.generation,"request_template":request,"opencode_v2":opencode_v2,"opencode_legacy_note":"opencode 字段保留旧版连接模板，不携带生成预设；请使用 opencode_v2 或 request_template。","workspace":cat.get("workspaces",&id)?.name,"base_url":format!("https://{}:{}/v1",g.config.domain,g.config.port),"model":m.model_name,"credential_env":w.credential_env,"ca_file":g.config.ca_file,"note":"客户端需设置凭据环境变量。使用私有 CA 或自签证书时，还需信任对应的 CA 或证书。","opencode":{"provider":{"phyxi":{"npm":"@ai-sdk/openai-compatible","name":"PhyXi","options":{"baseURL":format!("https://{}:{}/v1",g.config.domain,g.config.port),"apiKey":format!("{{env:{}}}",w.credential_env)},"models":{(m.model_name.clone()):{"name":m.model_name}}}}},"composition":cat.snapshot("workspaces",&id)?}),
     ))
 }
 pub(crate) async fn image_status(
@@ -164,7 +164,7 @@ pub(crate) async fn resolve_action(
             let c = prepared_config(a, &cat, id).await?;
             if std::env::var("PHYXI_MODEL_NETWORK").is_ok() && c.engine == config::Engine::LlamaCpu
             {
-                return Err("CPU 后端仅供原生本地测试；企业容器模式请选择 GPU 推理引擎"
+                return Err("CPU 后端仅供原生本地测试；容器模式请选择 GPU 推理引擎"
                     .to_string()
                     .into());
             }
@@ -189,7 +189,7 @@ pub(crate) async fn resolve_action(
                 return Err("模型端口与控制台冲突".to_string().into());
             }
             if crate::services::enabled() && [8443, 8766, 18765].contains(&c.port) {
-                return Err("模型端口与企业接入组件保留端口冲突".to_string().into());
+                return Err("模型端口与接入组件保留端口冲突".to_string().into());
             }
             c
         }
@@ -432,7 +432,7 @@ fn gateway_change_plan(
         )
     };
     let (kind, title, certificate_message) = match certificate {
-        "missing" => ("certificate_missing", "需要配置证书", "尚未配置企业证书，请先申请并导入，或导入已有证书与私钥。"),
+        "missing" => ("certificate_missing", "需要配置证书", "尚未配置证书。可导入 Let’s Encrypt 证书，或使用已有 CA。"),
         "identity_mismatch" => ("certificate_reissue", "需要重新签发证书", "当前证书未覆盖保存的访问域名 / IP。请按新地址生成 CSR 并签发，或导入已覆盖该地址的证书。"),
         "invalid" => ("certificate_invalid", "需要修复证书", "证书链、有效期或私钥校验未通过。请在证书管理查看原因，重新签发或导入匹配的有效证书。"),
         "invalid_config" => ("invalid_config", "需要修正入口配置", "入口配置不符合当前证书模式，请修改后再启用。"),
@@ -576,8 +576,15 @@ pub(crate) struct CertificateUpload {
     private_key: String,
     #[serde(default)]
     request_id: String,
+    #[serde(default)]
     ca: String,
+    #[serde(default)]
+    use_lets_encrypt: bool,
 }
+
+// Official ISRG trust anchors from https://letsencrypt.org/certificates/.
+const LETS_ENCRYPT_ROOTS: &str = include_str!("../certs/lets-encrypt-roots.pem");
+
 pub(crate) async fn certificate_upload(
     State(a): State<App>,
     Path(id): Path<String>,
@@ -611,7 +618,19 @@ pub(crate) async fn certificate_upload(
         fs::read_to_string(certificate_directory(&a, &body.request_id)?.join("server.key"))
             .map_err(|e| e.to_string())?
     };
-    for text in [&body.certificate, &private_key, &body.ca] {
+    let ca = if body.use_lets_encrypt {
+        if !body.ca.is_empty() || !body.request_id.is_empty() {
+            return Err(
+                "Let’s Encrypt 导入需要上传证书链和私钥，请勿同时提供根 CA 或 CSR 编号"
+                    .to_string()
+                    .into(),
+            );
+        }
+        LETS_ENCRYPT_ROOTS
+    } else {
+        &body.ca
+    };
+    for text in [body.certificate.as_str(), private_key.as_str(), ca] {
         if text.is_empty() || text.len() > 65536 {
             return Err("证书文件为空或超过 64 KiB".to_string().into());
         }
@@ -627,9 +646,9 @@ pub(crate) async fn certificate_upload(
         .map_err(|e| e.to_string())?;
     let result: std::result::Result<(), String> = async {
         for (name, text) in [
-            ("server.pem", &body.certificate),
-            ("server.key", &private_key),
-            ("ca.pem", &body.ca),
+            ("server.pem", body.certificate.as_str()),
+            ("server.key", private_key.as_str()),
+            ("ca.pem", ca),
         ] {
             let mut f = OpenOptions::new()
                 .write(true)

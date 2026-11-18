@@ -81,7 +81,7 @@ pub async fn status(r: &Runtime) -> Result<Value, String> {
         return Ok(json!({"managed":false}));
     }
     let mut rows = vec![];
-    for (name, label) in [(ACCESS, "工作区鉴权服务"), (GATEWAY, "Nginx 企业网关")] {
+    for (name, label) in [(ACCESS, "工作区鉴权服务"), (GATEWAY, "Nginx 网关")] {
         let v = match inspect(r, name).await {
             Ok(v) => v,
             Err(error) => {
@@ -123,7 +123,7 @@ pub async fn run(
     let gateway = inspect(r, GATEWAY).await?;
     if !start {
         if g.running().await? {
-            return Err("请先在企业网关页停止业务入口，再停止接入组件".into());
+            return Err("请先在网关页停止业务入口，再停止接入组件".into());
         }
         for (name, v) in [(GATEWAY, gateway), (ACCESS, access)] {
             if v.is_some() {
@@ -256,7 +256,7 @@ pub async fn run(
                 .await?
                 .is_some_and(|v| v["State"]["Running"] == true)
         {
-            store.event(id, "企业接入组件已就绪；业务入口仍需配置证书并显式启动")?;
+            store.event(id, "接入组件已就绪；业务入口仍需配置证书并显式启动")?;
             return Ok(());
         }
         if cancel.load(Ordering::SeqCst) {
@@ -281,13 +281,15 @@ pub async fn management(
         .await?
         .is_none_or(|v| v["State"]["Running"] != true)
     {
-        return Err("请先部署企业接入组件".into());
+        return Err("请先部署接入组件".into());
     }
     c.validate()?;
     let mut contents = vec![];
     if start {
         if c.tls_mode != "enterprise" {
-            return Err("企业管理入口需要上传有效企业证书，初始测试请继续使用 SSH 隧道".into());
+            return Err(
+                "控制台 HTTPS 入口需要上传有效的 CA 签发证书，初始测试请继续使用 SSH 隧道".into(),
+            );
         }
         g.validate_certificates(c).await?;
         for (source, dest) in [
@@ -375,7 +377,7 @@ pub async fn management(
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
-            return Err("企业管理入口未加载新配置，已尝试恢复旧入口".into());
+            return Err("控制台 HTTPS 入口未加载新配置，已尝试恢复旧入口".into());
         }
         Ok(())
     }

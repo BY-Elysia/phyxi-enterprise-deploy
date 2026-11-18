@@ -15,6 +15,6 @@ if a.staged:
  check(git('diff','--cached','--name-only','--diff-filter=A').splitlines(),pathlib.Path(a.message_file).read_text() if a.message_file else None)
 elif a.range:
  for current in git('rev-list','--reverse',a.range).splitlines():
-  check(git('diff-tree','--no-commit-id','--name-only','--diff-filter=A','-r',current).splitlines(),git('log','-1','--format=%B',current))
+  check(git('diff-tree','--root','--diff-merges=first-parent','--no-commit-id','--name-only','--diff-filter=A','-r',current).splitlines(),git('log','-1','--format=%B',current))
 else:p.error('choose --staged or --range')
 print('Development note policy passed')

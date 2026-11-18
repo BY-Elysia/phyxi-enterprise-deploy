@@ -4,6 +4,7 @@ __pycache__/
 .DS_Store
 config.local.json
 *.pem
+!console/certs/lets-encrypt-roots.pem
 *.key
 *.token
 .env

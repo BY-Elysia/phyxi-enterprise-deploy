@@ -84,7 +84,7 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
         ),
         probe("容器引擎", "docker", &docker_args),
         toolkit(r),
-        probe("企业网关", &nginx, &["-v"]),
+        probe("网关", &nginx, &["-v"]),
         probe("证书工具", "openssl", &["version"])
     );
     let checks = vec![system, driver, docker, toolkit, gateway, tls];

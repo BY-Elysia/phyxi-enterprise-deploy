@@ -1,5 +1,6 @@
 # Development rules
 
+- New branches must use `feature/<module-name>`, for example `feature/gateway`. Keep `main` and `dev` under their existing names. Never use the `codex/` prefix.
 - Active implementation: Rust in `console/`. Embedded HTML/CSS and small vanilla JavaScript are allowed; no Node/TypeScript/WASM build pipeline.
 - Scope: one server and one model instance; host preparation, model artifacts, explicit GPU UUID allocation, jobs/logs, enterprise gateway, acceptance and release records. A bounded llama.cpp CPU backend supports local tests. Fuse responsibilities inspired by GPUStack/Xinference/Semaphore inside this product; do not deploy those platforms. No multi-tenant, Kubernetes or remote scheduling.
 - `legacy/` contains migration reference code, not the new control plane. Do not revive Notebook/Jupyter.

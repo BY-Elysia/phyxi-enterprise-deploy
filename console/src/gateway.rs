@@ -82,14 +82,14 @@ impl GatewayConfig {
             return Err("未知证书模式".into());
         }
         if self.tls_mode == "self_signed" && self.bind_ip != "127.0.0.1" {
-            return Err("自签测试证书只允许回环地址；企业监听请导入 CA 证书".into());
+            return Err("自签测试证书只允许回环地址；非回环监听请导入 CA 证书".into());
         }
         if self.tls_mode == "enterprise" {
             if [&self.cert_file, &self.key_file, &self.ca_file]
                 .iter()
                 .any(|p| p.is_empty())
             {
-                return Err("尚未配置企业证书，请进入「证书管理」上传并校验证书".into());
+                return Err("尚未配置证书，请进入「证书管理」上传并校验证书".into());
             }
             for p in [&self.cert_file, &self.key_file, &self.ca_file] {
                 if !Path::new(p).is_absolute() {
@@ -165,7 +165,7 @@ impl Gateway {
         c.validate()?;
         let mut args = vec![
             "verify".into(),
-            "-CAfile".into(),
+            "-trusted".into(),
             c.ca_file.clone(),
             "-untrusted".into(),
             c.cert_file.clone(),
