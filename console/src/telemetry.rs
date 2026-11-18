@@ -26,17 +26,21 @@ pub fn start(store: Arc<Store>, runtime: Runtime) {
                 if values.len() == 2 {
                     let rss = values[0].parse::<u64>().unwrap_or(0);
                     let cpu = values[1].parse::<f64>().unwrap_or(0.0);
-                    let gpu = runtime.gpus().await.ok();
+                    let gpu = runtime.monitor_gpus().await.ok();
                     let mut samples = store
                         .setting("telemetry")
                         .ok()
                         .and_then(|v| v.as_array().cloned())
                         .unwrap_or_default();
-                    samples.push(json!({"unix":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),"console_rss_kib":rss,"console_cpu_percent":cpu,"gpus":gpu}));
+                    let unix = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    samples.push(json!({"unix":unix,"console_rss_kib":rss,"console_cpu_percent":cpu,"gpus":gpu}));
                     if samples.len() > 120 {
                         samples.drain(..samples.len() - 120);
                     }
-                    let _ = store.set_setting("telemetry", &json!(samples));
+                    let _ = store.record_telemetry(&samples, unix);
                 }
             }
             tokio::time::sleep(Duration::from_secs(10)).await;

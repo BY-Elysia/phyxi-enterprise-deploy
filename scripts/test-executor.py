@@ -9,8 +9,16 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
     d=pathlib.Path(tmp);host=d/'host';web=d/'web';host.mkdir();web.mkdir();bindir=d/'bin';bindir.mkdir()
     tree=ast.parse((ROOT/'scripts/smoke-console.py').read_text())
     fake=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='FAKE' for t in n.targets)).replace('time.sleep(.6)','time.sleep(3)')
-    for name in ['docker','nvidia-smi']:
-        (bindir/name).write_text(fake);(bindir/name).chmod(0o755)
+    # Simulate an older driver that rejects the extended monitoring query.
+    gpu_fixture = '''#!/usr/bin/env python3
+import sys
+if any('utilization.gpu' in arg for arg in sys.argv):
+    sys.exit(1)
+if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
+    print('GPU-00000000-0000-0000-0000-000000000001, NVIDIA H20, 97871, 0')
+'''
+    for name, body in [('docker', fake), ('nvidia-smi', gpu_fixture)]:
+        (bindir/name).write_text(body);(bindir/name).chmod(0o755)
     sock=d/'executor.sock';port=free_port();base=f'http://127.0.0.1:{port}'
     weights=(d/'weights').resolve();model=weights/'test-model';model.mkdir(parents=True)
     (model/'config.json').write_text('{}')
@@ -51,6 +59,21 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
         assert call('/api/image-sources','PUT',sources)[0]==200
         assert (host/'image-sources.json').exists() and not (web/'image-sources.json').exists()
         assert call('/api/config',authenticated=False)[0]==401
+        for endpoint in ['/api/monitor','/api/monitor/gpus']:
+            assert call(endpoint,authenticated=False)[0]==401
+        for _ in range(80):
+            status,monitor=call('/api/monitor')
+            assert status==200,(status,monitor)
+            gpu_status,gpu=call('/api/monitor/gpus?seconds=21600')
+            assert gpu_status==200,(gpu_status,gpu)
+            if monitor['samples'] and gpu['samples']:break
+            time.sleep(.1)
+        else:raise AssertionError('monitor samples did not reach the console through the executor')
+        assert monitor['metadata']['scope']=='host'
+        assert gpu['bucket_seconds']==60
+        device=gpu['samples'][-1]['gpus'][0]
+        assert device['total_mib']==97871
+        assert device.get('utilization_percent') is None
         assert call('/api/actions/verify_gpu','POST',authenticated=False)[0]==401
         status,c=call('/api/config');assert status==200,(status,c)
         browse='/api/models/local-paths?'+urllib.parse.urlencode({'root':str(weights)})

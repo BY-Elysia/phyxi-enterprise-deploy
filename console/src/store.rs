@@ -23,6 +23,8 @@ impl Store {
         let c = Connection::open(path).map_err(|e| e.to_string())?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, status INTEGER NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP);
+        CREATE TABLE IF NOT EXISTS monitor_samples (unix INTEGER PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS gpu_monitor_samples (unix INTEGER PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, action TEXT NOT NULL, status TEXT NOT NULL, step TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP, config TEXT NOT NULL);
@@ -40,6 +42,98 @@ impl Store {
                 .map_err(|e| e.to_string())?;
         }
         Ok(Self(Mutex::new(c)))
+    }
+    pub fn monitor_sample(
+        &self,
+        sample: &serde_json::Value,
+        metadata: &serde_json::Value,
+    ) -> Result<(), String> {
+        let unix = sample["unix"].as_i64().ok_or("missing sample timestamp")?;
+        let mut c = self.0.lock().map_err(|e| e.to_string())?;
+        let tx = c.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR REPLACE INTO monitor_samples(unix,value) VALUES(?1,?2)",
+            params![unix, sample.to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM monitor_samples WHERE unix < ?1 OR unix NOT IN (SELECT unix FROM monitor_samples ORDER BY unix DESC LIMIT 5760)",[unix-86400]).map_err(|e|e.to_string())?;
+        tx.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES('monitor_metadata',?1)",
+            [metadata.to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+    pub fn monitor_history(&self) -> Result<serde_json::Value, String> {
+        let c = self.0.lock().map_err(|e| e.to_string())?;
+        let mut statement=c.prepare("SELECT value FROM monitor_samples WHERE unix >= CAST(strftime('%s','now') AS INTEGER)-86400 ORDER BY unix").map_err(|e|e.to_string())?;
+        let rows = statement
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        let samples = rows
+            .map(|r| {
+                r.map_err(|e| e.to_string()).and_then(|s| {
+                    serde_json::from_str::<serde_json::Value>(&s).map_err(|e| e.to_string())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let raw = c
+            .query_row(
+                "SELECT value FROM settings WHERE key='monitor_metadata'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "{}".into());
+        let metadata: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        Ok(serde_json::json!({"samples":samples,"metadata":metadata}))
+    }
+    pub fn record_telemetry(&self, samples: &[serde_json::Value], unix: i64) -> Result<(), String> {
+        let latest = samples.last().ok_or("missing telemetry sample")?;
+        let mut connection = self.0.lock().map_err(|e| e.to_string())?;
+        let tx = connection.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES('telemetry',?1)",
+            [serde_json::to_string(samples).map_err(|e| e.to_string())?],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT OR REPLACE INTO gpu_monitor_samples(unix,value) VALUES(?1,?2)",
+            params![unix, latest["gpus"].to_string()],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.execute(
+            "DELETE FROM gpu_monitor_samples WHERE unix < ?1",
+            [unix - 86400],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+    pub fn gpu_history(&self, seconds: i64, bucket: i64) -> Result<serde_json::Value, String> {
+        let connection = self.0.lock().map_err(|e| e.to_string())?;
+        let mut statement = connection
+            .prepare(
+                "SELECT unix,value FROM gpu_monitor_samples WHERE unix IN (
+                    SELECT MAX(unix) FROM gpu_monitor_samples
+                    WHERE unix BETWEEN CAST(strftime('%s','now') AS INTEGER)-?1
+                                   AND CAST(strftime('%s','now') AS INTEGER)
+                    GROUP BY unix / ?2
+                ) ORDER BY unix",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = statement
+            .query_map(params![seconds, bucket], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        let samples = rows
+            .map(|row| {
+                let (unix, raw) = row.map_err(|e| e.to_string())?;
+                let gpus: serde_json::Value =
+                    serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+                Ok(serde_json::json!({"unix":unix,"gpus":gpus}))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(serde_json::json!({"samples":samples,"bucket_seconds":bucket}))
     }
     pub fn audit_source(
         &self,
@@ -232,6 +326,94 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn monitor_history_retains_nulls_and_survives_restart_with_bounded_retention() {
+        let path = std::env::temp_dir().join(format!("phyxi-monitor-{}.db", uuid::Uuid::new_v4()));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        {
+            let store = Store::open(&path).unwrap();
+            store
+                .monitor_sample(
+                    &serde_json::json!({"unix":now-90000,"cpu_percent":99}),
+                    &serde_json::json!({}),
+                )
+                .unwrap();
+            store
+                .monitor_sample(
+                    &serde_json::json!({"unix":now,"cpu_percent":null}),
+                    &serde_json::json!({"scope":"local"}),
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .0
+                    .lock()
+                    .unwrap()
+                    .query_row("SELECT count(*) FROM monitor_samples", [], |r| r
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+        }
+        {
+            let store = Store::open(&path).unwrap();
+            let history = store.monitor_history().unwrap();
+            assert_eq!(history["samples"].as_array().unwrap().len(), 1);
+            assert!(history["samples"][0]["cpu_percent"].is_null());
+            assert_eq!(history["metadata"]["scope"], "local");
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    #[test]
+    fn gpu_history_retains_latest_sample_per_bucket_and_ages_out_old_rows() {
+        let path = std::env::temp_dir().join(format!("phyxi-gpu-{}.db", uuid::Uuid::new_v4()));
+        let store = Store::open(&path).unwrap();
+        let now: i64 = store
+            .0
+            .lock()
+            .unwrap()
+            .query_row("SELECT CAST(strftime('%s','now') AS INTEGER)", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let bucket_start = now / 60 * 60 - 60;
+        for (unix, value) in [
+            (now - 90000, serde_json::json!([])),
+            (
+                bucket_start,
+                serde_json::json!([{"utilization_percent":17}]),
+            ),
+            (
+                bucket_start + 1,
+                serde_json::json!([{"utilization_percent":0}]),
+            ),
+            (now, serde_json::Value::Null),
+        ] {
+            store
+                .record_telemetry(&[serde_json::json!({"gpus":value})], unix)
+                .unwrap();
+        }
+        drop(store);
+        {
+            let store = Store::open(&path).unwrap();
+            let history = store.gpu_history(21600, 60).unwrap();
+            let samples = history["samples"].as_array().unwrap();
+            assert_eq!(samples.len(), 2);
+            assert_eq!(samples[0]["gpus"][0]["utilization_percent"], 0);
+            assert!(samples[1]["gpus"].is_null());
+            let rows: u32 = store
+                .0
+                .lock()
+                .unwrap()
+                .query_row("SELECT count(*) FROM gpu_monitor_samples", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(rows, 3);
+        }
+        let _ = std::fs::remove_file(path);
+    }
     #[test]
     fn snapshots_and_restart_are_durable() {
         let path = std::env::temp_dir().join(format!("phyxi-{}.db", uuid::Uuid::new_v4()));

@@ -167,3 +167,7 @@ python3 scripts/test-composition.py
 ### 推理镜像目录
 
 vLLM、SGLang、LMDeploy 提供卡片目录和 11 个固定版本，选择后保存配置，再显式下载。支持自定义地址，已添加镜像独立管理。LMDeploy 使用 PyTorch 后端；版本、平台与兼容边界见 [推理镜像目录](docs/image-catalog.md)。
+
+### 服务器实时监控
+
+服务器页显示 CPU、内存、磁盘 I/O、网络吞吐以及每张 NVIDIA GPU 的计算利用率和显存占用。趋势图支持点击放大及 1、6、24 小时切换。采样范围和验证方式见 [服务器实时监控](docs/server-monitoring.md)。

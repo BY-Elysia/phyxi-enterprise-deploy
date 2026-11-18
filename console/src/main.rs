@@ -22,6 +22,7 @@ mod image_sources;
 mod job_control;
 mod local_images;
 mod local_models;
+mod monitor;
 mod presets;
 mod process;
 mod pull_terminal;
@@ -198,6 +199,8 @@ fn router(app: App) -> Router {
         .route("/services", get(service_status))
         .route("/services/{component}/logs", get(service_logs))
         .route("/telemetry", get(telemetry_get))
+        .route("/monitor", get(monitor_get))
+        .route("/monitor/gpus", get(gpu_monitor_get))
         .route("/metrics", get(metrics))
         .route("/model-metrics", get(model_metrics))
         .route("/status", get(status))
@@ -267,6 +270,24 @@ fn router(app: App) -> Router {
         .route("/brands/qwen.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/qwen.webp").as_slice()) }))
         .route("/brands/glm.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/glm.webp").as_slice()) }))
         .route("/brands/deepseek.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/deepseek.webp").as_slice()) }))
+        .route(
+            "/server-monitor.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/server-monitor.js"),
+                )
+            }),
+        )
+        .route(
+            "/server-monitor.css",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+                    include_str!("../web/server-monitor.css"),
+                )
+            }),
+        )
         .nest("/api", api)
         .layer(axum::extract::DefaultBodyLimit::max(16384))
         .layer(middleware::from_fn(|request:Request,next:Next| async move {
@@ -287,6 +308,26 @@ async fn model_metrics(State(a): State<App>) -> Result<Json<Value>> {
         ));
     }
     Ok(Json(json!({"text":text})))
+}
+async fn monitor_get(State(a): State<App>) -> Result<Json<Value>> {
+    Ok(Json(monitor::history(&a.store)?))
+}
+#[derive(Deserialize)]
+struct MonitorRange {
+    seconds: Option<i64>,
+}
+async fn gpu_monitor_get(
+    State(a): State<App>,
+    Query(range): Query<MonitorRange>,
+) -> Result<Json<Value>> {
+    let seconds = range.seconds.unwrap_or(3600);
+    let bucket = match seconds {
+        3600 => 10,
+        21600 => 60,
+        86400 => 180,
+        _ => return Err("监控时间范围只支持 1、6 或 24 小时".to_string().into()),
+    };
+    Ok(Json(a.store.gpu_history(seconds, bucket)?))
 }
 async fn telemetry_get(State(a): State<App>) -> Result<Json<Value>> {
     Ok(Json(a.store.setting("telemetry")?))
@@ -621,6 +662,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     if !executor::proxy() {
         catalog::migrate(&app.store)?;
         telemetry::start(app.store.clone(), app.runtime.clone());
+        monitor::start(app.store.clone(), data.clone());
     }
     if executor::enabled() {
         return executor::serve(app).await;
