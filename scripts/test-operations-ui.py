@@ -29,7 +29,10 @@ def main():
     headers={'Authorization':'Bearer '+TOKEN}
     def put(kind,id,data):
      response=page.request.put(base+'/api/catalog/'+kind+'/'+id,headers=headers,data={'name':id,'revision':0,'data':data});assert response.ok,response.text()
-    put('models','model-a',{'model_name':'test-model','model_path':'/tmp/fixture','source':None})
+    model_fixture=pathlib.Path(tmp,'models','fixture.gguf')
+    model_fixture.parent.mkdir()
+    model_fixture.write_bytes(b'GGUF')
+    put('models','model-a',{'model_name':'test-model','model_path':str(model_fixture),'source':None})
     put('runtimes','runtime-a',{'engine':'llama_cpu','max_model_len':512,'max_num_seqs':1,'gpu_memory_utilization':0.5,'tool_parser':'','reasoning_parser':'','verify_tools':False,'verify_images':False})
     put('images','image-a',{'engine':'vllm','reference':'vllm/vllm-openai:v0.11.0'})
     put('deployments','deploy-a',{'model':'model-a','runtime':'runtime-a','image':'','gpu_uuids':[],'port':18000})

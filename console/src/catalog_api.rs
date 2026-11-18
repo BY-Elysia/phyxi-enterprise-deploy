@@ -13,9 +13,15 @@ pub(crate) async fn catalog_get(State(a): State<App>) -> Result<Json<Value>> {
         serde_json::to_value(catalog::Catalog::load(&a.store)?).map_err(|e| e.to_string())?,
     ))
 }
+#[derive(Deserialize)]
+pub(crate) struct SaveOptions {
+    #[serde(default)]
+    local: bool,
+}
 pub(crate) async fn catalog_put(
     State(a): State<App>,
     Path((kind, id)): Path<(String, String)>,
+    Query(options): Query<SaveOptions>,
     Json(mut record): Json<catalog::Record>,
 ) -> Result<Json<Value>> {
     if kind == "workspaces" && id.starts_with("system-") {
@@ -24,7 +30,41 @@ pub(crate) async fn catalog_put(
     if kind == "models" {
         let mut model: catalog::Model =
             serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
-        if let Some(source) = model.source {
+        if options.local {
+            if model.source.is_some() {
+                return Err("添加已有权重时无需填写下载来源".to_string().into());
+            }
+            let data = a.runtime.data.clone();
+            let input = model.model_path.clone();
+            let path =
+                tokio::task::spawn_blocking(move || local_models::check_model(&data, &input))
+                    .await
+                    .map_err(|e| e.to_string())??;
+            let basename = if path.is_file() {
+                path.file_stem()
+            } else {
+                path.file_name()
+            }
+            .and_then(|s| s.to_str())
+            .unwrap_or("phyxi-model");
+            if record.name.trim().is_empty() {
+                record.name = basename.chars().take(40).collect();
+            }
+            if model.model_name.trim().is_empty() {
+                model.model_name = basename
+                    .chars()
+                    .take(100)
+                    .map(|c| {
+                        if c.is_ascii_alphanumeric() || "_-.".contains(c) {
+                            c
+                        } else {
+                            '-'
+                        }
+                    })
+                    .collect();
+            }
+            model.model_path = path.to_string_lossy().into_owned();
+        } else if let Some(source) = model.source {
             let source = artifacts::resolve(source).await?;
             model.model_path = artifacts::destination(&a.runtime.data, &source)
                 .display()
@@ -39,6 +79,17 @@ pub(crate) async fn catalog_put(
     cat.save(&a.store)?;
     Ok(Json(json!({"saved":true,"record":cat.get(&kind,&id)?})))
 }
+pub(crate) async fn local_model_paths(
+    State(a): State<App>,
+    Query(query): Query<local_models::Browse>,
+) -> Result<Json<Value>> {
+    let data = a.runtime.data.clone();
+    let result = tokio::task::spawn_blocking(move || local_models::browse(&data, query))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(Json(result))
+}
+
 pub(crate) async fn catalog_delete(
     State(a): State<App>,
     Path((kind, id)): Path<(String, String)>,

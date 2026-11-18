@@ -11,12 +11,13 @@ let certificateTarget=null,certificateRequest=null;
 let imageSourceLoadSequence=0;
 let detailPage='overview',logSequence=0,logLoading=false,logData=null,auditRows=[],maintenanceSequence=0;
 let presets={images:[],models:[],endpoints:[]};
+let modelMode='discover',modelVisible=9;
 let gatewayListLoading=false,gatewayWorkflowSequence=0,gatewayWorkflowSignature='';
 let managedServices=false,filterText='',jobsSignature='',environmentBusy=false,detailId='',authMode='token',csrf='',comparisonUpdated=0;
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},editing=null,connected=false,busy=false,jobs=[],activeJob='',runtime={};
 
 const fields={
- models:[['model_name','默认服务模型名','text','phyxi-model'],['model_path','本地权重路径（自行准备时填写）','text','/srv/phyxi/models/model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint','https://huggingface.co'],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
+ models:[['model_name','默认服务模型名','text','phyxi-model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint','https://huggingface.co'],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
  images:[['engine','推理引擎','gpu-engine','vllm'],['reference','Docker 镜像地址（标签或摘要）','text','']],
  runtimes:[['engine','推理引擎','engine','vllm'],['max_model_len','上下文长度','number',8192],['max_num_seqs','最大并发序列','number',8],['gpu_memory_utilization','显存使用比例','decimal',0.85],['tool_parser','工具解析器（可选）','optional',''],['reasoning_parser','思考解析器（可选）','optional',''],['verify_tools','验收工具调用','checkbox',false],['verify_images','验收图片理解','checkbox',false]],
  deployments:[['model_name','API 服务模型名（留空使用权重配置的默认值）','optional',''],['model','模型权重','ref:models',''],['image','推理引擎镜像（CPU 可留空）','ref:images',''],['runtime','推理参数方案','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','原生模式 API 端口（容器内固定 8000）','number',18000]],
@@ -67,13 +68,194 @@ $('catalog-search').oninput=e=>{filterText=e.target.value.trim().toLowerCase();r
 window.addEventListener('hashchange',()=>{showView(location.hash.slice(1));});
 async function load(){const [c,p]=await Promise.all([api('/catalog'),api('/presets')]);catalog=c.records;presets=p;render();}
 function emptyState(title,description){const box=document.createElement('div');box.className='empty-state';const icon=document.createElement('span');icon.className='empty-icon';icon.textContent='◇';icon.setAttribute('aria-hidden','true');const h=document.createElement('h3');h.textContent=title;const p=document.createElement('p');p.textContent=description;box.append(icon,h,p);return box;}
-function render(){if(!fields[view])return;document.querySelector('#catalog-list thead th:nth-child(3)').textContent=view==='gateways'?'运行状态 / 待处理事项':'配置修订号';$('list-title').textContent=view==='gateways'?'访问入口配置':titles[view];$('create').textContent='＋ 新建'+(view==='gateways'?'访问入口':titles[view]);$('records').replaceChildren();const all=Object.entries(catalog[view]||{}),entries=all.filter(([,r])=>!filterText||(r.name+' '+summary(view,r.data)).toLowerCase().includes(filterText));$('record-count').textContent=filterText?`${entries.length} / ${all.length} 项`:`${all.length} 项`;for(const [id,r]of entries){const tr=document.createElement('tr');if(selection[view]===id)tr.className='selected-row';const a=document.createElement('td'),b=document.createElement('td'),c=document.createElement('td'),d=document.createElement('td');const pick=button(r.name,()=>showView(view+'/'+encodeURIComponent(id)));pick.className='link-button record-name';a.append(pick);if(view==='deployments'){const state=document.createElement('small');state.className='deployment-state';state.dataset.id=id;state.textContent=runtime.composition?.id===id?instanceState(runtime.state):'未运行';a.append(state);}b.textContent=summary(view,r.data);b.className='record-summary';c.textContent='r'+r.revision;c.className='revision-cell';const viewButton=button('查看',()=>pick.click());viewButton.className='quiet';const editButton=button('编辑',()=>edit(id));editButton.className='quiet';d.className='row-actions';d.append(viewButton,editButton);if(view==='gateways'){tr.dataset.gatewayId=id;c.className='gateway-list-state';c.textContent='检查状态中…';const controls=document.createElement('div');controls.className='gateway-list-controls';d.append(controls);}tr.append(a,b,c,d);$('records').append(tr);}if(!entries.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.append(emptyState(filterText?'没有匹配的配置':'尚未创建'+(view==='gateways'?'访问入口':titles[view]),filterText?'尝试其他名称或清空搜索条件。':view==='gateways'?'新建访问入口，配置域名、证书和要访问的模型。':'点击右上角“新建'+titles[view]+'”，配置保存后可在部署时组合使用。'));row.append(cell);$('records').append(row);}renderSelection();if(view==='gateways'&&!detailId)refreshGatewayList();}
+function render(){if(!fields[view])return;
+ updateAssetSurface();
+ if(view==='models'&&modelMode==='discover'&&!detailId)renderModelMarket();
+ const assets=view==='models';
+ $('catalog-table').hidden=assets;$('asset-records').hidden=!assets;$('asset-records').replaceChildren();
+ document.querySelector('#catalog-list thead th:nth-child(3)').textContent=view==='gateways'?'运行状态 / 待处理事项':'配置修订号';$('list-title').textContent=view==='gateways'?'访问入口配置':titles[view];$('create').textContent='＋ 新建'+(view==='gateways'?'访问入口':titles[view]);$('records').replaceChildren();const all=Object.entries(catalog[view]||{}),entries=all.filter(([,r])=>!filterText||(r.name+' '+summary(view,r.data)).toLowerCase().includes(filterText));$('record-count').textContent=filterText?`${entries.length} / ${all.length} 项`:`${all.length} 项`;if(assets){
+ for(const [id,r] of entries)$('asset-records').append(assetRecordCard(view,id,r));
+ if(!entries.length)$('asset-records').append(emptyState(filterText?'没有匹配的配置':'尚未添加'+titles[view],filterText?'尝试其他名称或清空搜索条件。':'可以从服务器添加已有资源，或选择仓库来源。'));
+ renderSelection();
+ return;
+ }for(const [id,r]of entries){const tr=document.createElement('tr');if(selection[view]===id)tr.className='selected-row';const a=document.createElement('td'),b=document.createElement('td'),c=document.createElement('td'),d=document.createElement('td');const pick=button(r.name,()=>showView(view+'/'+encodeURIComponent(id)));pick.className='link-button record-name';a.append(pick);if(view==='deployments'){const state=document.createElement('small');state.className='deployment-state';state.dataset.id=id;state.textContent=runtime.composition?.id===id?instanceState(runtime.state):'未运行';a.append(state);}b.textContent=summary(view,r.data);b.className='record-summary';c.textContent='r'+r.revision;c.className='revision-cell';const viewButton=button('查看',()=>pick.click());viewButton.className='quiet';const editButton=button('编辑',()=>edit(id));editButton.className='quiet';d.className='row-actions';d.append(viewButton,editButton);if(view==='gateways'){tr.dataset.gatewayId=id;c.className='gateway-list-state';c.textContent='检查状态中…';const controls=document.createElement('div');controls.className='gateway-list-controls';d.append(controls);}tr.append(a,b,c,d);$('records').append(tr);}if(!entries.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.append(emptyState(filterText?'没有匹配的配置':'尚未创建'+(view==='gateways'?'访问入口':titles[view]),filterText?'尝试其他名称或清空搜索条件。':view==='gateways'?'新建访问入口，配置域名、证书和要访问的模型。':'点击右上角“新建'+titles[view]+'”，配置保存后可在部署时组合使用。'));row.append(cell);$('records').append(row);}renderSelection();if(view==='gateways'&&!detailId)refreshGatewayList();}
 function output(v){$('selected-output').hidden=false;$('selected-output').textContent=typeof v==='string'?v:JSON.stringify(v,null,2);}
 function renderSelection(){$('gateway-workflow').hidden=true;const r=detailId?record():null;if(detailId){$('page-title').textContent=r?.name||'配置不存在';$('breadcrumb').textContent=titles[view]+' / '+(r?.name||'未找到');$('page-description').textContent=r?(view==='gateways'?'配置此入口的域名、证书和模型，然后启用并验收。':view==='workspaces'?'查看接入状态，在独立页面管理密钥、生成预设和导出。':view==='deployments'?'查看此实例的配置、运行状态和部署任务。':'查看此配置的完整内容与相关操作。'):'此配置可能已被删除，请返回列表。';document.title='PhyXi · '+(r?.name||'配置不存在');}$('selection-panel').hidden=!r;if(!r)return;$('selected-name').textContent=r.name;$('selected-info').textContent=view==='gateways'?`https://${r.data.config.domain}:${r.data.config.port}`:summary(view,r.data);$('selected-actions').replaceChildren();const id=selection[view],kind=view;const actions={models:['download'],images:['pull_image'],deployments:['start','redeploy','stop','verify'],gateways:[],runtimes:[],workspaces:[]};for(const action of actions[kind]){const b=button(actionNames[action],()=>submit(action,kind,id));if(['start','download','pull_image','gateway_start'].includes(action))b.className='primary';if(['stop','gateway_stop'].includes(action))b.className='quiet danger';if(kind==='deployments'&&['stop','redeploy','verify'].includes(action)){b.dataset.instanceAction=action;b.dataset.deployment=id;}if(action==='download'&&!r.data.source){b.disabled=true;b.title='本地路径无需下载；如需下载，请先填写模型来源';}$('selected-actions').append(b);}if(['models','images','runtimes'].includes(kind))$('selected-actions').append(button('编辑配置',()=>edit(id)));if(['models','images'].includes(kind))resourceDetails(kind,r.data);if(kind==='models')$('selected-actions').append(button('检查服务器权重文件',()=>assetStatus(kind,id)));if(kind==='deployments'){$('deployment-check-result').hidden=true;$('selected-actions').append(button('编辑部署配置',()=>edit(id)));const check=button('检查配置组合与变更',()=>checkDeployment(id,check));$('selected-actions').prepend(check);const logs=button('查看运行日志',()=>showView('logs/model/'+encodeURIComponent(id)));logs.dataset.instanceAction='logs';logs.dataset.deployment=id;$('selected-actions').append(logs);}if(kind==='images')$('selected-actions').append(button('检查服务器镜像',()=>assetStatus(kind,id)));if(kind==='workspaces')renderWorkspace(id);$('asset-readiness').hidden=!['models','images','deployments','runtimes'].includes(kind);if(kind==='runtimes')runtimeDetails(r.data);if(kind==='deployments')deploymentDetails(id).catch(e=>notice(e.message,true));if(['models','images'].includes(kind))assetStatus(kind,id).catch(e=>notice(e.message,true));if(['gateways','workspaces'].includes(kind))renderDetailNavigation(kind,id);if(kind==='gateways'){if(detailPage==='certificates'){$('certificate-editor').hidden=false;if(certificateTarget?.id!==id)loadCertificates(id);}else gatewayWorkflow(id).catch(e=>gatewayWorkflowError(id,e));}updateActionAvailability();renderProgress().catch(e=>notice(e.message,true));}
-function edit(id){if(!connected)throw Error('请先登录控制台');const r=catalog[view]?.[id];editing={kind:view,id:id||crypto.randomUUID(),revision:r?.revision||0,page:r?detailPage:'overview'};$('record-form').elements.record_name.parentElement.hidden=false;$('editor-title').textContent=(r?'编辑':'新建')+titles[view];$('editor-error').textContent='';$('record-form').reset();$('record-form').elements.record_name.value=r?.name||'';$('editor-fields').replaceChildren();let data={...r?.data};if(view==='models')Object.assign(data,{source_repo:data.source?.repo||'',source_endpoint:data.source?.endpoint||'https://huggingface.co',source_revision:data.source?.revision||'main',source_file:data.source?.file||''});if(view==='gateways')data={deployment:data.deployment,...data.config};for(const [key,title,type,fallback]of fields[view]){const label=document.createElement('label');label.textContent=title;let input;if(type.startsWith('ref:')||['engine','gpu-engine','endpoint','tls'].includes(type)){input=document.createElement('select');let options=type.startsWith('ref:')?[['','稍后选择'],...Object.entries(catalog[type.slice(4)]||{}).map(([id,r])=>[id,r.name])]:type==='endpoint'?presets.endpoints.map(p=>[p.url,p.name]):type==='gpu-engine'?[['vllm','vLLM'],['sglang','SGLang']]:type==='engine'?[['vllm','vLLM · NVIDIA'],['sglang','SGLang · NVIDIA'],['llama_cpu','llama.cpp · CPU 测试']]:[['enterprise','CA 签发证书（推荐）'],['self_signed','自签 · 仅本地测试']];for(const [v,t]of options){const o=document.createElement('option');o.value=v;o.textContent=t;input.append(o);}}else{input=document.createElement('input');input.type=type==='checkbox'?'checkbox':['number','decimal'].includes(type)?'number':'text';if(type==='decimal')input.step='0.01';input.required=!['optional','checkbox'].includes(type);if(type==='number')input.min='1';}input.name=key;if(key==='domain')input.placeholder='例如 api.example.com；本地测试可填 localhost';const v=data[key]??fallback;if(type==='checkbox')input.checked=v;else input.value=Array.isArray(v)?v.join(', '):v;label.append(input);$('editor-fields').append(label);}addPresetPicker(view,Boolean(r));const engine=$('record-form').elements.engine;if(engine)engine.onchange=()=>{if(engine.value==='llama_cpu'){$('record-form').elements.max_model_len.value=512;$('record-form').elements.max_num_seqs.value=1;}};$('editor-hint').textContent=hints[view];$('delete-record').hidden=!r||view==='workspaces';groupEditor(view);if(view==='runtimes')addVllmEditor(data);if(view==='workspaces'){addGenerationEditor(data);if(r&&['access','generation'].includes(detailPage)){const generation=detailPage==='generation';$('editor-title').textContent=generation?'修改生成预设':'修改接入配置';$('record-form').elements.record_name.parentElement.hidden=generation;for(const child of $('editor-fields').children)child.hidden=generation?child.id!=='generation-editor':child.id==='generation-editor';$('editor-hint').textContent=generation?'保存后重新导出客户端配置，或在客户端设置相同参数；无需重启模型。':hints.workspaces;}}$('editor').showModal();if(view==='deployments')loadGpuChoices().catch(e=>notice(e.message,true));}
+function assetRecordCard(kind,id,record){
+ const data=record.data;
+ const facts=[['服务模型名',data.model_name],['来源',data.source?.repo||'服务器本地文件'],['版本',data.source?.revision||'本地权重'],['权重路径',data.model_path]];
+ const card=document.createElement('article');card.className='asset-record-card';
+ const head=document.createElement('div');head.className='asset-record-head';
+ const heading=document.createElement('h3');
+ const open=()=>showView(kind+'/'+encodeURIComponent(id));
+ const link=button(record.name,open);link.className='link-button record-name';
+ heading.append(link);
+ const actions=document.createElement('div');actions.className='actions';
+ actions.append(button('编辑配置',()=>edit(id)),button('查看详情',open));head.append(heading,actions);
+ const grid=document.createElement('dl');grid.className='asset-record-facts';
+ for(const [name,value] of facts){
+  const cell=document.createElement('div'),label=document.createElement('dt'),text=document.createElement('dd');
+  label.textContent=name;text.textContent=value;text.title=value;cell.append(label,text);grid.append(cell);
+ }
+ card.append(head,grid);
+ return card;
+}
+
+function editorField([key,title,type,fallback],data){
+ const label=document.createElement('label');label.textContent=title;
+ let input;
+ if(type.startsWith('ref:')||['engine','gpu-engine','endpoint','tls'].includes(type)){
+  input=document.createElement('select');
+  const options=type.startsWith('ref:')?[['','稍后选择'],...Object.entries(catalog[type.slice(4)]||{}).map(([id,r])=>[id,r.name])]:
+   type==='endpoint'?presets.endpoints.map(p=>[p.url,p.name]):
+   type==='gpu-engine'?[['vllm','vLLM'],['sglang','SGLang']]:
+   type==='engine'?[['vllm','vLLM · NVIDIA'],['sglang','SGLang · NVIDIA'],['llama_cpu','llama.cpp · CPU 测试']]:
+   [['enterprise','CA 签发证书（推荐）'],['self_signed','自签 · 仅本地测试']];
+  for(const [value,text] of options)input.append(new Option(text,value));
+ }else{
+  input=document.createElement('input');
+  input.type=type==='checkbox'?'checkbox':['number','decimal'].includes(type)?'number':'text';
+  if(type==='decimal')input.step='0.01';
+  if(type==='number')input.min='1';
+  input.required=!['optional','checkbox'].includes(type);
+ }
+ input.name=key;
+ if(key==='domain')input.placeholder='例如 api.example.com；本地测试可填 localhost';
+ const value=data[key]??fallback;
+ if(type==='checkbox')input.checked=value;
+ else input.value=Array.isArray(value)?value.join(', '):value;
+ label.append(input);
+ return label;
+}
+
+function editorButton(text,action){
+ const control=button(text,action);
+ control.type='button';
+ return control;
+}
+
+function mountAssetModes(local){
+ const nav=$('asset-source-mode');
+ nav.className='asset-source-tabs page-tabs';
+ nav.setAttribute('aria-label','模型权重来源');
+ for(const [mode,label] of [ ['download','下载新权重'],['local','添加已有权重'] ]){
+  const control=editorButton(label,()=>{if(!$('record-form').dataset.saving)edit(undefined,mode);});
+  control.setAttribute('aria-pressed',String((mode==='local')===local));
+  nav.append(control);
+ }
+}
+
+function mountLocalModel(data){
+ const box=$('local-asset-fields');
+ editing.modelPath=mountModelPathPicker(box,api,data.model_path||'');
+ box.append(editorField(['model_name','默认服务模型名（可选）','optional',''],data));
+ $('editor-hint').textContent='服务器会检查所选文件。检测通过后添加权重，权重文件保留原位。';
+}
+
+function edit(id,mode){
+ if(!connected)throw Error('请先登录控制台');
+ const kind=view,r=catalog[kind]?.[id],form=$('record-form'),recordName=form.elements.record_name;
+ const asset=kind==='models';
+ const existingLocal=asset&&r&&!r.data.source;
+ const local=asset&&(mode?mode==='local':Boolean(existingLocal));
+ editing={kind,id:id||crypto.randomUUID(),revision:r?.revision||0,page:r?detailPage:'overview',local};
+ delete form.dataset.saving;
+ form.reset();recordName.parentElement.hidden=false;recordName.required=!local;
+ recordName.value=r?.name||'';recordName.placeholder=local?'留空时自动命名':'';
+ $('record-name-label').textContent=local?'配置名称（可选）':'配置名称';
+ const save=form.querySelector('button[type=submit]');
+ save.disabled=false;
+ save.textContent=local?(r?'检测并保存':'检测并添加'):'保存配置';
+ $('editor-title').textContent=r?'编辑'+titles[kind]:local?'添加已有权重':'新建'+titles[kind];
+ $('editor-error').textContent='';
+ $('editor-fields').replaceChildren();$('local-asset-fields').replaceChildren();$('asset-source-mode').replaceChildren();
+ $('editor-hint').textContent=hints[kind];
+ $('delete-record').hidden=!r||kind==='workspaces';
+ if(asset&&!r)mountAssetModes(local);
+ let data={...r?.data};
+ if(local){
+  mountLocalModel(data);
+ }else{
+  if(kind==='models')Object.assign(data,{
+   source_repo:data.source?.repo||'',source_endpoint:data.source?.endpoint||'https://huggingface.co',
+   source_revision:data.source?.revision||'main',source_file:data.source?.file||'',
+  });
+  if(kind==='gateways')data={deployment:data.deployment,...data.config};
+  for(const field of fields[kind])$('editor-fields').append(editorField(field,data));
+  if(kind==='models')form.elements.source_repo.required=true;
+  addPresetPicker(kind,Boolean(r));groupEditor(kind);
+  if(kind==='runtimes'){
+   form.elements.engine.onchange=()=>{
+    if(form.elements.engine.value==='llama_cpu'){form.elements.max_model_len.value=512;form.elements.max_num_seqs.value=1;}
+   };
+   addVllmEditor(data);
+  }
+  if(kind==='workspaces'){
+   addGenerationEditor(data);
+   if(r&&['access','generation'].includes(detailPage)){
+    const generation=detailPage==='generation';
+    $('editor-title').textContent=generation?'修改生成预设':'修改接入配置';
+    recordName.parentElement.hidden=generation;
+    for(const child of $('editor-fields').children)child.hidden=generation?child.id!=='generation-editor':child.id==='generation-editor';
+    if(generation)$('editor-hint').textContent='保存后重新导出客户端配置，或在客户端设置相同参数；无需重启模型。';
+   }
+  }
+ }
+ if(!$('editor').open)$('editor').showModal();
+ if(kind==='deployments')loadGpuChoices().catch(e=>notice(e.message,true));
+}
+
 $('deployment-back').onclick=()=>showView(view);
 $('create').onclick=safe(()=>edit());$('close-editor').onclick=$('discard-editor').onclick=()=>$('editor').close();
-$('record-form').onsubmit=async e=>{e.preventDefault();const target=editing;const submit=e.target.querySelector('button[type=submit]');if(submit.disabled)return;submit.disabled=true;const oldText=submit.textContent;submit.textContent=target.kind==='models'?'保存并解析版本…':'保存中…';try{const form=e.target;let data={};for(const[key,,type]of fields[target.kind]){const input=form.elements[key];data[key]=type==='checkbox'?input.checked:['number','decimal'].includes(type)?Number(input.value):input.value.trim();}if(target.kind==='runtimes')data.vllm=readVllm(form);if(target.kind==='workspaces')data.generation=readGeneration(form);if(target.kind==='models'){data.source=data.source_repo?{repo:data.source_repo,revision:data.source_revision||'main',file:data.source_file,endpoint:data.source_endpoint}:null;delete data.source_repo;delete data.source_revision;delete data.source_file;delete data.source_endpoint;}if(target.kind==='deployments')data.gpu_uuids=data.gpu_uuids.split(',').map(s=>s.trim()).filter(Boolean);if(target.kind==='gateways'){data.allowed_cidrs=data.allowed_cidrs.split(',').map(s=>s.trim()).filter(Boolean);const deployment=data.deployment;delete data.deployment;const old=catalog.gateways?.[target.id]?.data.config||{};for(const key of ['cert_file','key_file','ca_file'])data[key]=old[key]||'';data={deployment,config:data};}await api(`/catalog/${target.kind}/${target.id}`,{method:'PUT',body:JSON.stringify({name:form.elements.record_name.value.trim(),revision:target.revision,data})});selection[target.kind]=target.id;if(Boolean(fields[target.kind]))showView(target.kind+'/'+encodeURIComponent(target.id)+(target.kind==='workspaces'&&['access','generation'].includes(target.page)?'/'+target.page:''));if(editing===target)$('editor').close();await load();if(target.kind==='gateways'){const state=await api(`/gateways/${target.id}/readiness`);notice('已保存。'+(state.impact?.title||'请查看入口状态')+'。');await gatewayWorkflow(target.id);}else notice('配置已保存。运行实例继续使用原有快照。');}catch(err){$('editor-error').textContent=err.message;}finally{submit.disabled=false;submit.textContent=oldText;}};
+$('record-form').onsubmit=async event=>{
+ event.preventDefault();
+ const target=editing,form=event.target,submit=form.querySelector('button[type=submit]');
+ if(submit.disabled)return;
+ const oldText=submit.textContent;
+ submit.disabled=true;form.dataset.saving='true';$('editor-error').textContent='';
+ submit.textContent=target.local?'正在检测…':target.kind==='models'?'保存并解析版本…':'保存中…';
+ try{
+  const fieldsOfForm=form.elements,kind=target.kind;
+  const query=new URLSearchParams();
+  let data={};
+  if(target.local){
+   query.set('local','true');
+   data={model_path:target.modelPath.read(),model_name:fieldsOfForm.model_name.value.trim(),source:null};
+  }else{
+   for(const [key,,type] of fields[kind]){
+    const input=fieldsOfForm[key];
+    data[key]=type==='checkbox'?input.checked:['number','decimal'].includes(type)?Number(input.value):input.value.trim();
+   }
+   if(kind==='runtimes')data.vllm=readVllm(form);
+   if(kind==='workspaces')data.generation=readGeneration(form);
+   if(kind==='models'){
+    const {model_name,source_repo,source_revision,source_file,source_endpoint}=data;
+    data={model_name,model_path:'',source:{repo:source_repo,revision:source_revision||'main',file:source_file,endpoint:source_endpoint}};
+   }
+   if(kind==='deployments')data.gpu_uuids=data.gpu_uuids.split(',').map(value=>value.trim()).filter(Boolean);
+   if(kind==='gateways'){
+    data.allowed_cidrs=data.allowed_cidrs.split(',').map(value=>value.trim()).filter(Boolean);
+    const deployment=data.deployment;delete data.deployment;
+    const old=catalog.gateways?.[target.id]?.data.config||{};
+    for(const key of ['cert_file','key_file','ca_file'])data[key]=old[key]||'';
+    data={deployment,config:data};
+   }
+  }
+  const path='/catalog/'+kind+'/'+target.id+(query.size?'?'+query:'');
+  await api(path,{method:'PUT',body:JSON.stringify({name:fieldsOfForm.record_name.value.trim(),revision:target.revision,data})});
+  selection[kind]=target.id;
+  showView(kind+'/'+encodeURIComponent(target.id)+(kind==='workspaces'&&['access','generation'].includes(target.page)?'/'+target.page:''));
+  if(editing===target)$('editor').close();
+  await load();
+  if(kind==='gateways'){
+   const state=await api('/gateways/'+target.id+'/readiness');
+   notice('已保存。'+(state.impact?.title||'请查看入口状态')+'。');
+   await gatewayWorkflow(target.id);
+  }else notice(target.local?'检测通过，配置已保存。':'配置已保存。运行实例继续使用原有快照。');
+ }catch(error){if(editing===target)$('editor-error').textContent=error.message;}
+ finally{if(editing===target){delete form.dataset.saving;submit.disabled=false;submit.textContent=oldText;}}
+};
+
 $('delete-record').onclick=async()=>{if(!await confirmAction({title:'删除配置',description:'删除后无法在配置列表中恢复。被其他配置引用或正在使用的配置会拒绝删除，不删除服务器上的权重文件或镜像。',accept:'删除配置',danger:true,facts:[['配置',catalog[editing.kind]?.[editing.id]?.name||'所选配置']]}))return;try{await api(`/catalog/${editing.kind}/${editing.id}`,{method:'DELETE'});const kind=editing.kind;delete selection[kind];$('editor').close();await load();showView(kind);}catch(e){$('editor-error').textContent=e.message;}};
 async function submit(action,kind,id){if(['services_stop','management_start','management_stop'].includes(action)&&!await confirmAction({title:actionNames[action],description:action==='services_stop'?'将停止 Nginx 和工作区鉴权，所有经过网关的客户端请求及控制台 HTTPS 入口会中断；正在处理的请求也可能断开。模型容器继续运行，SSH 隧道和控制台继续可用。':action==='management_start'?'使用此网关的CA 签发的证书、域名、监听地址和来源限制，在 8443 端口启用控制台 HTTPS 登录入口；不启动模型。':'关闭控制台 HTTPS 入口；SSH 隧道仍可访问控制台。',accept:actionNames[action],danger:action!=='management_start'}))return;if(['start','redeploy'].includes(action)&&kind==='deployments'){const plan=await api(`/deployments/${id}/preview`);await deploymentDetails(id);if(!await confirmAction({title:actionNames[action],description:action==='redeploy'?'将停止当前模型及关联网关，再按新配置启动。服务会短暂中断；失败时需检查任务记录并恢复。':'将按以下配置启动模型服务，启动后占用对应的计算资源。',accept:actionNames[action],danger:action==='redeploy',facts:[['部署实例',name(kind,id)],['服务模型名',plan.config.model_name],['推理引擎',engineName(plan.config.engine)],['上下文长度',plan.config.max_model_len]]}))return;}if(['stop','gateway_stop','prepare','repair_toolkit'].includes(action)&&!await confirmAction({title:actionNames[action],description:action==='stop'?'停止后，此模型服务将无法处理请求。已保存的配置、权重和镜像会保留。':action==='gateway_stop'?'停止后，客户端将无法通过此网关访问模型服务。模型实例继续运行。':'将检查并安装或修复宿主机的 NVIDIA 容器支持，不替换显卡驱动。必要时会重启 Docker，控制台短暂断开；存在其他运行容器或 GPU 任务时拒绝变更。',accept:actionNames[action],danger:true,facts:kind?[['操作对象',name(kind,id)]]:[]}))return;const suffix=kind?`?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`:'';const job=await api('/actions/'+action+suffix,{method:'POST'});activeJob=job.id;notice(actionNames[action]+'已提交，执行结果和日志可在运维与审计 → 任务记录查看。');await refresh();}
 async function renderProgress(){const r=record();const job=fields[view]&&r&&(!['gateways','workspaces'].includes(view)||detailPage==='overview')?jobs.find(j=>j.composition?.kind===view&&j.composition?.id===selection[view]):null;$('inline-progress').hidden=!job;if(job){const box=$('progress-status');box.replaceChildren();const text=document.createElement('p');text.textContent=(actionNames[job.action]||job.action)+' · '+(states[job.status]||job.status)+' · '+taskStep(job);box.append(text);$('progress-audit-link').onclick=e=>{e.preventDefault();activeJob=job.id;showView('tasks');};}}
@@ -134,6 +316,54 @@ $('logout').onclick=safe(async()=>{if(authMode==='password'){const r=await fetch
 async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法验证登录状态，请刷新重试');const data=await r.json();authMode=data.mode;if(authMode==='password'){sessionStorage.removeItem('phyxi-token');token='';if(!data.authenticated){location.replace('/login');return;}csrf=data.csrf;}else if(!token){location.replace('/login');return;}await finishConnect();}
 async function auditView(){auditRows=await api('/audit');renderAudit();}
 
+function updateAssetSurface(){
+ const visible=view==='models'&&!detailId;
+ const discover=visible&&modelMode==='discover';
+ $('create').hidden=discover;
+ $('model-tabs').hidden=!visible;
+ $('model-discovery').hidden=!discover;
+ $('catalog-list').hidden=Boolean(detailId)||discover;
+ $('model-discover-tab').setAttribute('aria-pressed',String(modelMode==='discover'));
+ $('model-library-tab').setAttribute('aria-pressed',String(modelMode==='library'));
+}
+function modelTab(mode){modelMode=mode;render();}
+$('model-discover-tab').onclick=()=>modelTab('discover');
+$('model-library-tab').onclick=()=>modelTab('library');
+$('model-local').onclick=safe(()=>edit(undefined,'local'));
+$('model-custom').onclick=safe(()=>{edit();const picker=$('model-preset-select');picker.value='custom';picker.dispatchEvent(new Event('change'));$('record-form').elements.record_name.value='';$('record-form').elements.model_name.value='';});
+for(const id of ['model-search','model-brand','model-modality','model-size'])$(id).addEventListener(id==='model-search'?'input':'change',()=>{modelVisible=9;renderModelMarket();});
+$('model-show-more').onclick=()=>{modelVisible+=9;renderModelMarket();};
+function chooseModelPreset(preset){
+ edit();const picker=$('model-preset-select');picker.value=preset.id;picker.dispatchEvent(new Event('change'));
+ $('editor-title').textContent='添加 '+preset.name;
+ $('editor-hint').textContent=hints.models+' '+preset.backend_note;
+ const info=document.createElement('p');info.id='model-selection-note';info.className='model-selection-note';info.textContent=modelPresetSummary(preset);
+ $('editor-fields').prepend(info);
+}
+function renderModelMarket(){
+ const search=$('model-search').value.trim().toLowerCase(),brand=$('model-brand').value,modality=$('model-modality').value,size=$('model-size').value;
+ const entries=presets.models.filter(p=>(brand==='all'||p.brand===brand)&&(modality==='all'||p.modality===modality)&&(size==='all'||(size==='small'?p.parameters_b<=8:size==='medium'?p.parameters_b>8&&p.parameters_b<=32:p.parameters_b>32))&&(!search||[p.name,p.brand,p.repo,p.description].join(' ').toLowerCase().includes(search)));
+ $('model-result-count').textContent=entries.length+' 个模型';const box=$('model-cards');box.replaceChildren();
+ for(const p of entries.slice(0,modelVisible)){
+  const card=document.createElement('article');card.className='model-card';card.dataset.preset=p.id;
+  const head=document.createElement('div');head.className='model-card-head';const logo=document.createElement('img');logo.src=p.logo;logo.alt=p.brand;logo.width=38;logo.height=38;
+  const identity=document.createElement('div'),brandLabel=document.createElement('span'),title=document.createElement('h3');brandLabel.className='model-brand-label';brandLabel.textContent=p.brand;title.textContent=p.name;title.title=p.name;identity.append(brandLabel,title);head.append(logo,identity);
+  const badges=document.createElement('div');badges.className='model-tags';for(const text of [p.modality==='vision'?'多模态':'文本生成',p.architecture,p.precision]){const tag=document.createElement('span');tag.textContent=text;badges.append(tag);}
+  const desc=document.createElement('p');desc.className='model-card-description';desc.textContent=p.description;
+  const facts=document.createElement('dl');facts.className='model-card-facts';
+  for(const [label,value,extra]of [['参数规模',p.parameters_b+'B',p.active_parameters_b?'激活 '+p.active_parameters_b+'B':'稠密模型'],['权重体积',bytes(p.weight_bytes),'官方文件快照']]){const group=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd'),small=document.createElement('small');dt.textContent=label;dd.textContent=value;small.textContent=extra;group.append(dt,dd,small);facts.append(group);}
+  const backend=document.createElement('p');backend.className='model-card-backend';backend.textContent='后端参考 · '+p.backend+' '+p.backend_reference;backend.title=p.backend_note;
+  const foot=document.createElement('div');foot.className='model-card-footer';const source=document.createElement('a');source.href=p.homepage;source.target='_blank';source.rel='noopener noreferrer';source.textContent='官方模型卡 ↗';source.title='许可：'+p.license;
+  const existing=Object.entries(catalog.models||{}).find(([,r])=>r.data.source?.repo===p.repo);
+  const choose=button(existing?'查看已添加':'选择模型',()=>existing?showView('models/'+encodeURIComponent(existing[0])):chooseModelPreset(p));choose.className=existing?'quiet':'model-choose';foot.append(source,choose);
+  card.append(head,badges,desc,facts,backend,foot);box.append(card);
+ }
+ if(!entries.length)box.append(emptyState('没有匹配的模型','调整品牌、能力、规模或搜索关键词。'));
+ $('model-show-more').hidden=modelVisible>=entries.length;
+}
+
+function modelPresetSummary(preset){return `${preset.parameters_b}B${preset.active_parameters_b?' · 激活 '+preset.active_parameters_b+'B':''} · ${preset.precision} · 权重约 ${bytes(preset.weight_bytes)}。保存后可下载，不会启动模型。`;}
+
 showView(location.hash.slice(1));initAuth().catch(e=>{document.body.classList.remove('auth-pending');notice(e.message,true);});setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
 
 async function loadGpuChoices(){
@@ -145,6 +375,29 @@ async function loadGpuChoices(){
 }
 
 function addPresetPicker(kind,isExisting){
+ if(kind==='images')return addLegacyImagePreset(isExisting);
+ if(kind!=='models')return;
+ const label=document.createElement('label');label.className='wide preset-picker';label.textContent='选择模型来源';
+ const select=document.createElement('select');select.id='model-preset-select';
+ select.append(new Option('自定义模型来源','custom'),...presets.models.map(p=>new Option(p.name,p.id)));
+ const hint=document.createElement('p');hint.className='hint';
+ const f=$('record-form').elements;
+ select.onchange=()=>{
+  const preset=presets.models.find(p=>p.id===select.value);
+  const info=$('model-selection-note');
+  if(info){info.hidden=!preset;if(preset)info.textContent=modelPresetSummary(preset);}
+  if(!isExisting)$('editor-title').textContent=preset?'添加 '+preset.name:'新建模型权重';
+  f.source_repo.value=preset?.repo||'';f.source_revision.value=preset?.revision||'main';f.source_file.value='';
+  if(preset){
+   f.record_name.value=preset.name;f.model_name.value=preset.model_name;
+  }
+  hint.textContent=preset?.note||'请在下方填写自定义来源地址。';
+ };
+ label.append(select,hint);$('editor-fields').prepend(label);
+ if(!isExisting&&presets.models.length){select.value=presets.models[0].id;select.onchange();}
+}
+function addLegacyImagePreset(isExisting){
+ const kind='images';
  if(!['models','images'].includes(kind))return;
  const label=document.createElement('label');label.className='wide preset-picker';label.textContent=kind==='images'?'选择预设推理引擎镜像':'选择模型来源';
  const select=document.createElement('select');select.setAttribute('aria-label',label.textContent);const entries=presets[kind]||[];
@@ -154,6 +407,9 @@ function addPresetPicker(kind,isExisting){
  select.onchange=fill;label.append(select,hint);$('editor-fields').prepend(label);
  if(!isExisting&&entries.length){select.value=entries[0].id;fill();}else if(kind==='images'){const f=$('record-form').elements;const match=entries.find(p=>p.reference===f.reference.value)||(isDefaultImage(f.reference.value)?entries.find(p=>p.engine===f.engine.value):null);if(match){select.value=match.id;$('record-form').elements.reference.parentElement.hidden=true;hint.textContent=match.note;}}
 }
+
+function isDefaultImage(ref){return presets.images.some(p=>p.reference===ref)||['vllm/vllm-openai:v0.11.0','lmsysorg/sglang:v0.5.5'].includes(ref);}
+
 async function assetStatus(kind,id){
  const result=await api(`/${kind}/${id}/status`);if(view!==kind||detailId!==id)return;
  const downloading=jobs.some(j=>j.status==='running'&&j.composition?.kind===kind&&j.composition?.id===id&&['pull_image','download'].includes(j.action));const ready=kind==='images'?result.available:result.ready;const detail=kind==='images'?(ready?`架构 ${result.architecture||'未知'} · ${bytes(result.size_bytes)}`:'服务器未找到该镜像，请先下载推理引擎镜像；也可在本服务器手动 docker pull。'):result.detail;
@@ -238,7 +494,7 @@ const details=document.createElement('details');details.className='parameter-sec
 async function checkDeployment(id,trigger){if(trigger.disabled)return;trigger.disabled=true;trigger.textContent='正在检查…';const result=$('deployment-check-result');result.hidden=false;result.className='check-feedback';result.textContent='正在检查配置组合并对比运行快照…';try{const v=await deploymentDetails(id);if(!v||view!=='deployments'||detailId!==id)return;result.className='check-feedback '+(v.preparation_error?'check-failed':'check-passed');result.textContent=v.preparation_error?'检查未通过：'+v.preparation_error:!v.running?'配置组合检查完成：当前无运行实例。启动时仍会检查权重、GPU 和服务健康。':v.changes.length?`检查完成：发现 ${v.changes.length} 项未应用变更，请查看下方“待应用变更”表格。`:'检查完成：当前草稿与运行配置一致。';result.scrollIntoView({behavior:'smooth',block:'nearest'});}catch(e){if(view==='deployments'&&detailId===id){result.className='check-feedback check-failed';result.textContent='检查失败：'+e.message;}}finally{trigger.disabled=false;trigger.textContent='检查配置组合与变更';}}
 
 function dataTable(headers,rows){const table=document.createElement('table');table.className='parameter-table';const head=table.createTHead().insertRow();for(const title of headers){const th=document.createElement('th');th.textContent=title;head.append(th);}const body=table.createTBody();for(const values of rows){const row=body.insertRow();for(const value of values)row.insertCell().textContent=String(value??'—');}return table;}
-function groupEditor(kind){const groups={models:[['模型标识',['model_name']],['下载来源',['source_repo','source_endpoint','source_revision','source_file']],['服务器文件',['model_path']]],images:[['推理引擎与版本',['engine','reference']]],runtimes:[['推理引擎',['engine']],['资源与性能',['max_model_len','max_num_seqs','gpu_memory_utilization']],['解析器',['tool_parser','reasoning_parser']],['验收选项',['verify_tools','verify_images']]],deployments:[['服务标识',['model_name']],['选择独立配置',['model','image','runtime']],['资源分配',['gpu_uuids','port']]],gateways:[['关联服务',['deployment']],['HTTPS 入口',['domain','bind_ip','port']],['访问限制',['allowed_cidrs']],['TLS 证书',['tls_mode']]],workspaces:[['客户端连接',['gateway','credential_env']]]};const target=$('editor-fields');for(const [title,keys]of groups[kind]||[]){const heading=document.createElement('h3');heading.className='form-section-title';heading.textContent=title;target.append(heading);for(const key of keys){const input=$('record-form').elements[key];if(input)target.append(input.parentElement);}}}
+function groupEditor(kind){const groups={models:[['模型标识',['model_name']],['下载来源',['source_repo','source_endpoint','source_revision','source_file']]],images:[['推理引擎与版本',['engine','reference']]],runtimes:[['推理引擎',['engine']],['资源与性能',['max_model_len','max_num_seqs','gpu_memory_utilization']],['解析器',['tool_parser','reasoning_parser']],['验收选项',['verify_tools','verify_images']]],deployments:[['服务标识',['model_name']],['选择独立配置',['model','image','runtime']],['资源分配',['gpu_uuids','port']]],gateways:[['关联服务',['deployment']],['HTTPS 入口',['domain','bind_ip','port']],['访问限制',['allowed_cidrs']],['TLS 证书',['tls_mode']]],workspaces:[['客户端连接',['gateway','credential_env']]]};const target=$('editor-fields');for(const [title,keys]of groups[kind]||[]){const heading=document.createElement('h3');heading.className='form-section-title';heading.textContent=title;target.append(heading);for(const key of keys){const input=$('record-form').elements[key];if(input)target.append(input.parentElement);}}}
 $('copy-key').onclick=safe(async()=>{try{await navigator.clipboard.writeText($('generated-key').value);$('copy-key-status').textContent='密钥已复制，请保存到客户端。';}catch{$('generated-key').select();$('copy-key-status').textContent='请使用系统复制快捷键复制选中的密钥。';}});
 $('refresh-reports').onclick=safe(renderReports);
 async function renderReports(){const box=$('reports'),trigger=$('refresh-reports');trigger.disabled=true;box.replaceChildren(emptyState('正在读取验收记录',''));try{const data=await api('/reports');if(view!=='reports')return;box.replaceChildren();const report=data.verification;if(report&&Object.keys(report).length){const card=document.createElement('section');card.className='panel report-card';const head=document.createElement('div');head.className='heading';const h=document.createElement('h2');h.textContent='最近一次验收';const badge=document.createElement('span');badge.className='state '+(report.passed?'succeeded':'failed');badge.textContent=report.passed?'验收通过':'验收未通过';head.append(h,badge);card.append(head,parameterSection('验收对象',[['服务模型',report.model_config?.model_name||'未记录'],['入口',report.via_gateway?'网关':'模型接口'],['耗时',report.elapsed_ms!=null?report.elapsed_ms+' ms':'未记录']]));if(report.error){const p=document.createElement('p');p.className='check-feedback check-failed';p.textContent=report.error;card.append(p);}if(report.cases?.length)card.append(dataTable(['验收项目','结果'],report.cases.map(c=>[c.name,c.passed?'通过':'未通过'])));box.append(card);}else box.append(emptyState('暂无验收结果','从部署实例运行“接口验收”，检查模型服务是否可用。'));const releases=Array.isArray(data.releases)?data.releases:[];const panel=document.createElement('section');panel.className='panel section';const h=document.createElement('h2');h.textContent='发布历史';panel.append(h);if(!releases.length)panel.append(emptyState('尚无发布版本','从网关执行验收并记录发布版本后，会在这里保留历史。'));for(const release of releases){const details=document.createElement('details');details.className='release-card';const title=document.createElement('summary');title.textContent=(release.model?.model_name||'模型服务')+' · '+formatTime(release.created_unix);details.append(title,parameterSection('发布信息',[['网关',release.gateway?.domain||'未记录'],['配置对象',release.composition?.name||'未记录'],['材料目录',release.export_directory||'未记录'],['记录 ID',release.id]]));panel.append(details);}box.append(panel);}catch(e){box.replaceChildren(emptyState('无法读取验收记录',e.message+'；请点击“刷新记录”重试。'));}finally{trigger.disabled=false;}}
@@ -255,7 +511,7 @@ function imageSourceMode(){$('image-prefix-field').hidden=$('image-source-mode')
 function gatewayImageMode(){const custom=$('gateway-image-mode').value==='custom';$('gateway-image-field').hidden=!custom;$('gateway-image-reference').required=custom;}
 $('image-source-mode').onchange=imageSourceMode;$('gateway-image-mode').onchange=gatewayImageMode;
 $('image-sources-form').onsubmit=async e=>{e.preventDefault();const b=e.target.querySelector('button[type=submit]');b.disabled=true;const result=$('image-source-result');result.textContent='正在保存…';try{if(!defaultGatewayImage)throw Error('设置尚未加载完成，请刷新页面后重试');await api('/image-sources',{method:'PUT',body:JSON.stringify({mode:$('image-source-mode').value,mirror_prefix:$('image-source-prefix').value.trim(),gateway_image:$('gateway-image-mode').value==='default'?defaultGatewayImage:$('gateway-image-reference').value.trim()})});result.textContent='已保存，后续下载使用此设置。';await loadImageSources();if(record())await assetStatus('images',selection.images);}catch(error){result.textContent=error.message;}finally{b.disabled=false;}};
-function isDefaultImage(ref){return presets.images.some(p=>p.reference===ref)||['vllm/vllm-openai:v0.11.0','lmsysorg/sglang:v0.5.5'].includes(ref);}
+
 function gatewayStartBlock(s){
  if(s.busy)return '任务执行中，请等待完成';
  if(!s.certificate_ready)return s.impact?.title||'请先配置有效证书';

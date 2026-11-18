@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Isolated executor/console process tests; run on CI or the target server, no real containers."""
-import ast, http.cookiejar, json, os, pathlib, socket, subprocess, tempfile, time, urllib.request, urllib.error
+import ast, http.cookiejar, json, os, pathlib, socket, subprocess, tempfile, time, urllib.request, urllib.error, urllib.parse
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 BINARY=ROOT/'target/debug/phyxi-console'
 def free_port():
@@ -12,7 +12,12 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
     for name in ['docker','nvidia-smi']:
         (bindir/name).write_text(fake);(bindir/name).chmod(0o755)
     sock=d/'executor.sock';port=free_port();base=f'http://127.0.0.1:{port}'
-    env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'PHYXI_STATE_DIR':str(host),'PHYXI_EXECUTOR_SOCKET':str(sock),'PHYXI_FAKE_STATE':str(d/'fake'),'PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock'}
+    weights=(d/'weights').resolve();model=weights/'test-model';model.mkdir(parents=True)
+    (model/'config.json').write_text('{}')
+    (model/'model.safetensors').write_bytes(b'fixture')
+    outside=(d/'outside').resolve();outside.mkdir()
+    (weights/'escape').symlink_to(outside,target_is_directory=True)
+    env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'PHYXI_STATE_DIR':str(host),'PHYXI_EXECUTOR_SOCKET':str(sock),'PHYXI_FAKE_STATE':str(d/'fake'),'PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock','PHYXI_MODEL_ROOTS':str(weights)}
     wenv={**env,'PHYXI_ROLE':'console','PHYXI_STATE_DIR':str(web),'PHYXI_LOCAL_HTTP_LOGIN':'1','PHYXI_REQUIRE_ADMIN':'1','PHYXI_PORT':str(port),'PHYXI_EXECUTOR_TOKEN_FILE':str(d/'executor.token')}
     subprocess.run([str(BINARY),'--set-admin'],env=wenv,input='executor-test-password',text=True,check=True,stdout=subprocess.DEVNULL)
     log=(d/'process.log').open('w');agent=None;console=None
@@ -48,6 +53,21 @@ with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
         assert call('/api/config',authenticated=False)[0]==401
         assert call('/api/actions/verify_gpu','POST',authenticated=False)[0]==401
         status,c=call('/api/config');assert status==200,(status,c)
+        browse='/api/models/local-paths?'+urllib.parse.urlencode({'root':str(weights)})
+        status,folder=call(browse)
+        assert status==200 and folder['path']==str(weights)
+        assert [entry['name'] for entry in folder['entries']]==['test-model']
+        assert call(browse+'&path=escape')[0]==400
+        assert call(browse+'&path=..')[0]==400
+        assert call(browse,authenticated=False)[0]==401
+        target='/api/catalog/models/local?local=true'
+        record={'name':'','revision':0,'data':{'model_name':'','model_path':str(outside),'source':None}}
+        assert call(target,'PUT',record)[0]==400
+        record['data']['model_path']='test-model'
+        assert call(target,'PUT',record)[0]==400
+        record['data']['model_path']=str(model)
+        status,saved=call(target,'PUT',record)
+        assert status==200 and saved['record']['data']['model_path']==str(model)
         c.update(image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'],tensor_parallel=1)
         assert call('/api/config','PUT',c)[0]==200
         assert call('/api/actions/arbitrary-shell','POST')[0]==404

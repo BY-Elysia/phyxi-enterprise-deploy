@@ -20,6 +20,7 @@ mod host_metrics;
 mod host_setup;
 mod image_sources;
 mod job_control;
+mod local_models;
 mod presets;
 mod process;
 mod pull_terminal;
@@ -178,6 +179,7 @@ fn router(app: App) -> Router {
         )
         .route("/presets", get(|| async { Json(presets::list()) }))
         .route("/models/{id}/status", get(catalog_api::model_status))
+        .route("/models/local-paths", get(catalog_api::local_model_paths))
         .route("/catalog", get(catalog_get))
         .route(
             "/catalog/{kind}/{id}",
@@ -234,6 +236,15 @@ fn router(app: App) -> Router {
             }),
         )
         .route(
+            "/model-path-picker.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("../web/model-path-picker.js"),
+                )
+            }),
+        )
+        .route(
             "/app.js",
             get(|| async {
                 (
@@ -251,6 +262,9 @@ fn router(app: App) -> Router {
                 )
             }),
         )
+        .route("/brands/qwen.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/qwen.webp").as_slice()) }))
+        .route("/brands/glm.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/glm.webp").as_slice()) }))
+        .route("/brands/deepseek.webp", get(|| async { ([(header::CONTENT_TYPE, "image/webp")], include_bytes!("../web/brands/deepseek.webp").as_slice()) }))
         .nest("/api", api)
         .layer(axum::extract::DefaultBodyLimit::max(16384))
         .layer(middleware::from_fn(|request:Request,next:Next| async move {
