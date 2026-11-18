@@ -31,6 +31,10 @@ pub struct Gpu {
     pub name: String,
     pub total_mib: u64,
     pub used_mib: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub utilization_percent: Option<u8>,
 }
 async fn read<R: tokio::io::AsyncRead + Unpin>(
     mut r: R,
@@ -153,6 +157,21 @@ impl Runtime {
         )
         .await?;
         parse_gpus(&out)
+    }
+    pub async fn monitor_gpus(&self) -> Result<Vec<Gpu>, String> {
+        let result = execute(
+            smi(&[
+                "--query-gpu=uuid,name,memory.total,memory.used,index,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ]),
+            None,
+            15,
+        )
+        .await;
+        match result.and_then(|out| parse_gpus(&out)) {
+            Ok(devices) => Ok(devices),
+            Err(_) => self.gpus().await,
+        }
     }
     pub async fn inspect(&self) -> Result<Option<Value>, String> {
         let out = self
@@ -440,7 +459,7 @@ pub fn parse_gpus(out: &str) -> Result<Vec<Gpu>, String> {
         .filter(|s| !s.trim().is_empty())
         .map(|line| {
             let p: Vec<_> = line.split(',').map(str::trim).collect();
-            if p.len() != 4 {
+            if p.len() != 4 && p.len() != 6 {
                 return Err("无法解析 GPU 列表".into());
             }
             Ok(Gpu {
@@ -448,6 +467,11 @@ pub fn parse_gpus(out: &str) -> Result<Vec<Gpu>, String> {
                 name: p[1].into(),
                 total_mib: p[2].parse().map_err(|_| "无法解析总显存")?,
                 used_mib: p[3].parse().map_err(|_| "无法解析已用显存")?,
+                index: p.get(4).and_then(|field| field.parse().ok()),
+                utilization_percent: p
+                    .get(5)
+                    .and_then(|field| field.parse().ok())
+                    .filter(|value| *value <= 100),
             })
         })
         .collect()
@@ -477,8 +501,18 @@ mod tests {
     }
     #[test]
     fn parses_gpu_inventory() {
-        let g = parse_gpus("GPU-a, NVIDIA H20, 97871, 20\n").unwrap();
+        let g = parse_gpus(
+            "GPU-a, NVIDIA H20, 97871, 20, 3, 0\nGPU-b, NVIDIA H20, 97871, 500, 4, [N/A]\n",
+        )
+        .unwrap();
         assert_eq!(g[0].used_mib, 20);
+        assert_eq!(g[0].index, Some(3));
+        assert_eq!(g[0].utilization_percent, Some(0));
+        assert_eq!(g[1].utilization_percent, None);
+        let basic = parse_gpus("GPU-a, NVIDIA H20, 97871, 20").unwrap();
+        assert_eq!(basic[0].used_mib, 20);
+        assert_eq!(basic[0].index, None);
+        assert_eq!(basic[0].utilization_percent, None);
         assert!(parse_gpus("broken").is_err());
     }
 }

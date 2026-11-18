@@ -1,0 +1,76 @@
+/* Server monitoring: real time series, separate inventory and software tabs. */
+.monitor-host-strip{display:flex;align-items:center;gap:20px;background:#fff;border:1px solid #dde2e9;border-radius:4px;padding:16px 20px}.monitor-host-strip strong{font-size:13px}.monitor-host-strip .hint{margin:0;font-size:11px}#monitor-freshness{margin-left:auto;font-size:11px;color:#7d899b}.monitor-host-strip button{font-size:12px}#environment-view>#host-platform{font-size:10px;color:#8995a6;margin:10px 0 0}.monitor-tabs{display:flex;gap:28px;border-bottom:1px solid #d7dbe2;margin:8px 0 20px}.monitor-tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:15px 0;color:#69778d;font-size:12px}.monitor-tabs button[aria-pressed=true]{color:#0a1a3a;border-bottom-color:#cb4b16;font-weight:600}.monitor-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:16px;font-size:12px}.monitor-toolbar select{margin:0;padding:6px 10px;font-size:11px}.monitor-auto{display:flex;align-items:center;gap:6px;font-size:11px;white-space:nowrap}.monitor-auto input{width:auto;margin:0;accent-color:#0a1a3a}.monitor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.monitor-chart-card{border:1px solid #dde2e9;background:#fff;border-radius:4px;padding:20px 20px 12px;min-width:0}.monitor-chart-card h3{font-size:12px;font-weight:500;color:#53637c}.monitor-reading{display:flex;align-items:baseline;gap:7px;margin:12px 0 14px}.monitor-reading strong{font-size:26px;letter-spacing:-.5px;line-height:1.15;font-weight:600;color:#0a1a3a;font-variant-numeric:tabular-nums}.monitor-reading>span{font-size:11px;color:#75839a}.monitor-reading small{font-size:10px;color:#8995a6;margin-left:auto}.monitor-chart{display:block;width:100%;height:160px;overflow:visible}.monitor-chart text{font-size:9px;fill:#94a0b1}.monitor-chart .monitor-empty{font-size:12px;fill:#748094}.monitor-legend{display:flex;gap:20px;color:#718097;font-size:10px;padding-top:10px;border-top:1px solid #f0f2f5}.monitor-legend>span:before{content:'';display:inline-block;width:12px;height:2px;background:#304d78;margin-right:6px;vertical-align:middle}.monitor-legend>.secondary:before{background:#cb7950}.monitor-capacity{display:flex;align-items:center;gap:32px;background:white;border:1px solid #dde2e9;border-radius:4px;padding:20px;margin-top:16px;color:#53637c;font-size:12px}.monitor-capacity h3{font-size:12px;color:#0a1a3a}.monitor-capacity small{display:block;font-size:10px;color:#8995a6;margin-top:6px;overflow-wrap:anywhere}.monitor-capacity>div:first-child{max-width:35%}.monitor-disk-meter{flex:1}.monitor-disk-meter progress{display:block;width:100%;height:4px;margin-top:10px;accent-color:#607695}.monitor-capacity>span{white-space:nowrap}#monitor-error{font-size:12px;color:#b04827}#monitor-software .host-card .metric-value{font-size:21px}#monitor-software .host-card .hint{font-size:11px}#monitor-gpus .host-grid{margin-top:0}
+@media(max-width:1000px){.monitor-reading{flex-wrap:wrap}.monitor-reading small{flex-basis:100%;margin:0}.monitor-host-strip{flex-wrap:wrap}.monitor-capacity{flex-wrap:wrap}.monitor-capacity>div:first-child{max-width:100%}}
+@media(max-width:700px){.monitor-grid{grid-template-columns:1fr}.monitor-host-strip{gap:12px;padding:16px}.monitor-host-strip .hint{flex-basis:100%}#monitor-freshness{margin:0}.monitor-host-strip button{margin-left:auto}.monitor-toolbar{flex-wrap:wrap}.monitor-tabs{gap:24px}.monitor-chart-card{padding:18px 14px 12px}.monitor-capacity{gap:16px}.monitor-disk-meter{min-width:180px}.monitor-reading small{flex-basis:auto;margin-left:auto}.monitor-chart{height:155px}}
+
+/* Cloud-console palette: UI actions and chart series have separate color roles. */
+#environment-view{--monitor-action:#0972d3;--monitor-series-primary:#0972d3;--monitor-series-secondary:#7c3aed;--monitor-text:#172b4d;--monitor-muted:#607089;--monitor-border:#d8e0ea}
+#environment-view .monitor-chart-card[data-metric=memory_percent]{--monitor-series-primary:#7c3aed}
+#environment-view .monitor-host-strip,#environment-view .monitor-chart-card,#environment-view .monitor-capacity{border-color:var(--monitor-border);background:#fff}
+#environment-view .monitor-host-strip strong,#environment-view .monitor-reading strong,#environment-view .monitor-capacity h3{color:var(--monitor-text)}
+#environment-view .monitor-chart-card h3,#environment-view .monitor-reading>span,#environment-view .monitor-reading small,#environment-view .monitor-legend,#environment-view .monitor-capacity,#environment-view .monitor-capacity small,#environment-view #monitor-freshness,#environment-view #host-platform{color:var(--monitor-muted)}
+#environment-view .monitor-tabs{border-color:var(--monitor-border)}
+#environment-view .monitor-tabs button[aria-pressed=true]{color:var(--monitor-action);border-bottom-color:var(--monitor-action)}
+#environment-view .monitor-tabs button:hover{color:var(--monitor-action);background:#f0f7ff}
+#environment-view #inspect{color:var(--monitor-action);border-color:#b6cee8;background:#fff}#environment-view #inspect:hover{background:#edf6ff;border-color:var(--monitor-action)}
+#environment-view select{color:#344563;border-color:var(--monitor-border);background-color:#fff}
+#environment-view .monitor-auto input{accent-color:var(--monitor-action)}
+#environment-view :focus-visible{outline-color:var(--monitor-action)}
+#environment-view .monitor-chart text{fill:#68778d}#environment-view .monitor-chart line{stroke:#e9eef5}#environment-view .monitor-chart .monitor-empty{fill:var(--monitor-muted)}
+#environment-view .monitor-legend>span:before{background:var(--monitor-series-primary);height:2px;width:15px}
+#environment-view .monitor-legend>.secondary:before{background:repeating-linear-gradient(to right,var(--monitor-series-secondary) 0 5px,transparent 5px 8px)}
+#environment-view .monitor-disk-meter progress{appearance:none;border:0;background:#e9f0f8;border-radius:3px;height:5px;accent-color:var(--monitor-action)}
+#environment-view .monitor-disk-meter progress::-webkit-progress-bar{background:#e9f0f8;border-radius:3px}#environment-view .monitor-disk-meter progress::-webkit-progress-value{background:var(--monitor-action);border-radius:3px}#environment-view .monitor-disk-meter progress::-moz-progress-bar{background:var(--monitor-action);border-radius:3px}
+/* Keep monitoring focused on values; explanations remain available on demand. */
+#environment-view .monitor-toolbar{justify-content:flex-end}#environment-view .monitor-chart-card{display:flex;flex-direction:column}#environment-view .monitor-chart{margin-bottom:auto}#environment-view .monitor-chart-card:not(:has(.monitor-legend)){padding-bottom:20px}
+
+/* Fixed monitoring content uses the desktop viewport, without clipping overflow. */
+.environment-page main{padding-top:20px;padding-bottom:18px}.environment-page .page-heading{margin-bottom:14px}.environment-page .page-heading h1{margin:0}.monitor-navigation{display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid #d7dbe2;margin:0 0 12px}.monitor-navigation .monitor-tabs{border:0;margin:0;flex-shrink:0}.monitor-navigation .monitor-tabs button{padding:12px 0}.monitor-navigation .monitor-toolbar{margin:0}.monitor-host-strip #inspect{margin-left:auto}#environment-view .monitor-host-strip{padding:10px 16px}.monitor-capacity{padding:12px 16px;margin-top:12px}.monitor-capacity>div:first-child{flex-shrink:0}.monitor-capacity .monitor-disk-meter{min-width:0}
+@media(min-width:1100px) and (min-height:640px){
+ .environment-page main{height:calc(100dvh - 64px);display:flex;flex-direction:column;gap:0;min-height:0}
+ .environment-page .page-heading{flex-shrink:0}.environment-page #environment-view{display:flex;flex-direction:column;flex:1;min-height:0}
+ .environment-page .monitor-host-strip,.environment-page .monitor-navigation{flex-shrink:0}
+ .environment-page #monitor-metrics{display:flex;flex-direction:column;flex:1;min-height:0}
+ .environment-page .monitor-grid{flex:1;min-height:320px;grid-template-rows:repeat(2,minmax(0,1fr));gap:12px}
+ #environment-view .monitor-chart-card,#environment-view .monitor-chart-card:not(:has(.monitor-legend)){padding:14px 18px 10px;min-height:0}
+ #environment-view .monitor-chart-card h3{flex-shrink:0;line-height:18px}
+ #environment-view .monitor-reading{margin:7px 0 6px;flex-shrink:0}
+ #environment-view .monitor-reading strong{font-size:24px}
+ #environment-view .monitor-chart{height:0;min-height:65px;flex:1;width:100%;margin:0}
+ #environment-view .monitor-legend{padding-top:5px;min-height:20px;flex-shrink:0}
+ .environment-page .monitor-capacity{flex-shrink:0;gap:24px}
+}
+@media(max-width:1099px){.monitor-navigation{flex-wrap:wrap;gap:0 16px;padding-bottom:10px}.monitor-navigation .monitor-toolbar{margin-left:auto}.monitor-navigation .monitor-tabs{width:100%;margin-bottom:8px}.environment-page .monitor-chart{height:130px}.environment-page .monitor-chart-card{padding:16px 16px 10px}}
+#environment-view .monitor-chart text{font-size:10px}#environment-view .monitor-chart .monitor-empty{font-size:12px}
+.gpu-monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:12px}
+#environment-view .gpu-monitor-card{min-width:0}
+#environment-view .gpu-monitor-card h3{color:var(--monitor-text)}
+#environment-view .gpu-monitor-card .monitor-chart{height:144px;flex:none;margin:0}
+.gpu-monitor-uuid{color:var(--monitor-muted);font-size:10px;overflow-wrap:anywhere;margin:2px 0 12px}
+#environment-view .gpu-monitor-values{display:flex;flex-direction:column;align-items:flex-start;gap:5px;margin:0 0 8px}
+#environment-view .gpu-monitor-values>span{display:inline-flex;align-items:center;gap:5px;font-size:11px}
+.gpu-monitor-values strong{color:var(--monitor-text);font-variant-numeric:tabular-nums}
+#environment-view .monitor-chart-card{position:relative}
+#environment-view .monitor-chart-trigger{display:block;width:100%;padding:0;border:0;border-radius:4px;background:transparent;cursor:zoom-in}
+#environment-view .monitor-chart-trigger:hover{background:#f4f8fc}
+#environment-view .monitor-chart-trigger .monitor-chart{margin:0}
+#environment-view .gpu-monitor-card .monitor-chart-trigger{flex:none}
+.monitor-expand{position:absolute;right:14px;top:10px;font-size:16px;line-height:20px;color:var(--monitor-muted)}
+.monitor-chart-trigger:hover .monitor-expand,.monitor-chart-trigger:focus-visible .monitor-expand{color:var(--monitor-action)}
+#monitor-chart-dialog{position:fixed;inset:0;margin:auto;width:min(1120px,calc(100% - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:clamp(16px,3vw,28px);border:1px solid var(--monitor-border);border-radius:8px;overflow:auto;background:#fff;color:var(--monitor-text);box-shadow:0 20px 70px #22334c25}
+#monitor-chart-dialog .dialog-title{align-items:flex-start}
+#monitor-chart-title{margin:0;font-size:clamp(16px,2vw,22px)}
+#monitor-chart-detail{margin:4px 0 0;overflow-wrap:anywhere}
+#monitor-chart-values{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0}
+#environment-view #monitor-chart-plot{height:clamp(180px,54dvh,580px);margin:0}
+#environment-view #monitor-chart-plot text{font-size:12px}
+body:has(#monitor-chart-dialog[open]){overflow:hidden}
+@media(min-width:1100px) and (min-height:640px){
+ #environment-view #monitor-charts .monitor-chart-trigger{flex:1;min-height:65px}
+ #environment-view #monitor-charts .monitor-chart-trigger .monitor-chart{height:100%}
+}
+@media(max-width:700px){
+ #monitor-chart-dialog .dialog-title{gap:8px}
+ #environment-view #monitor-chart-plot text{font-size:11px}
+}
+#monitor-chart-dialog .dialog-title form{margin:0}

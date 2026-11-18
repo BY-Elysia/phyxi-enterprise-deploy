@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const titles={deployments:'部署实例',models:'模型权重',images:'推理引擎镜像',runtimes:'推理参数',gateways:'企业网关',workspaces:'客户端工作区',environment:'服务器资源与依赖',operations:'服务维护',logs:'运行日志',tasks:'任务记录',audit:'管理员审计',reports:'验收与发布'};
-const descriptions={deployments:'把模型权重、推理镜像和推理参数组合成服务，选择 GPU 与端口，再启动或停止。',models:'选择 GLM、Qwen 等预设来源或自定义仓库，先下载权重，也可使用自行准备的本地文件。预设只填地址，不自动下载。',images:'管理 vLLM / SGLang 的 Docker 镜像地址和下载状态。镜像包含推理程序及依赖，不包含模型权重；部署前需下载到服务器。',runtimes:'管理基础参数与高级参数，按需添加受校验的扩展选项；参数方案需与推理引擎镜像一致。',gateways:'为客户端提供统一的 HTTPS 模型访问入口，并通过工作区 API Key 验证身份。',workspaces:'配置客户端使用的企业网关和独立 API Key，可单独撤销访问权限，并导出客户端连接配置。',environment:'查看显卡、内存、磁盘和软件依赖的检测结果；镜像下载在“推理引擎镜像”，模型文件下载在“模型权重”。',operations:'统一维护访问服务、控制台 HTTPS 与网关。',logs:'按来源与对象查看日志，搜索和下载当前结果。',audit:'查看管理员操作的时间、账户、来源与结果。',tasks:'按区域查看执行结果、任务日志与配置快照。',reports:'查看真实接口验收结果与发布记录。'};
+const titles={deployments:'部署实例',models:'模型权重',images:'推理引擎镜像',runtimes:'推理参数',gateways:'企业网关',workspaces:'客户端工作区',environment:'服务器',operations:'服务维护',logs:'运行日志',tasks:'任务记录',audit:'管理员审计',reports:'验收与发布'};
+const descriptions={deployments:'把模型权重、推理镜像和推理参数组合成服务，选择 GPU 与端口，再启动或停止。',models:'选择 GLM、Qwen 等预设来源或自定义仓库，先下载权重，也可使用自行准备的本地文件。预设只填地址，不自动下载。',images:'管理 vLLM / SGLang 的 Docker 镜像地址和下载状态。镜像包含推理程序及依赖，不包含模型权重；部署前需下载到服务器。',runtimes:'管理基础参数与高级参数，按需添加受校验的扩展选项；参数方案需与推理引擎镜像一致。',gateways:'为客户端提供统一的 HTTPS 模型访问入口，并通过工作区 API Key 验证身份。',workspaces:'配置客户端使用的企业网关和独立 API Key，可单独撤销访问权限，并导出客户端连接配置。',environment:'',operations:'统一维护访问服务、控制台 HTTPS 与网关。',logs:'按来源与对象查看日志，搜索和下载当前结果。',audit:'查看管理员操作的时间、账户、来源与结果。',tasks:'按区域查看执行结果、任务日志与配置快照。',reports:'查看真实接口验收结果与发布记录。'};
 const actionNames={services_start:'准备网关服务',services_stop:'停止全部访问服务',management_start:'启用控制台 HTTPS',management_stop:'关闭控制台 HTTPS',start:'启动模型服务',redeploy:'重新部署',stop:'停止模型服务',download:'下载权重',pull_image:'下载推理引擎镜像',certificate:'校验证书 / 生成测试证书',gateway_start:'启动网关',gateway_apply:'使新配置生效（无需重启）',gateway_stop:'停止网关',verify:'测试连接',publish:'验收并记录发布版本',prepare:'安装 NVIDIA 容器工具',repair_toolkit:'修复 Docker GPU 配置',verify_gpu:'验证 GPU 容器访问'};
 const states={running:'执行中',succeeded:'成功',failed:'失败',cancelled:'已取消',interrupted:'已中断'};
 const engineNames={vllm:'vLLM',sglang:'SGLang',llama_cpu:'llama.cpp（CPU 测试）'};
@@ -44,7 +44,7 @@ function showView(key){
  detailPage=parts[2]||'overview';if(detailId)selection[view]=detailId;
  const path=detailId?view+'/'+encodeURIComponent(detailId)+(detailPage!=='overview'?'/'+detailPage:''):view==='logs'?key:view;
  if(location.hash.slice(1)!==path)history.pushState(null,'','#'+path);
- document.body.classList.toggle('deployment-detail',Boolean(detailId));$('deployment-back').hidden=!detailId;
+ document.body.classList.toggle('environment-page',view==='environment');document.body.classList.toggle('deployment-detail',Boolean(detailId));$('deployment-back').hidden=!detailId;
  $('deployment-back').textContent='← 返回'+titles[view]+'列表';$('catalog-list').hidden=Boolean(detailId);
  $('page-title').textContent=titles[view];$('breadcrumb').textContent=titles[view];$('page-description').textContent=descriptions[view];document.title='PhyXi · '+titles[view];
  for(const b of $('navigation').children)b.classList.toggle('active',b.dataset.view===view);
@@ -93,6 +93,10 @@ function metricCard(title,value,description,percent){
  if(Number.isFinite(percent)){const bar=document.createElement('progress');bar.max=100;bar.value=Math.max(0,Math.min(100,percent));bar.setAttribute('aria-label',title+'占用比例');card.append(bar);}
  card.append(note);return card;
 }
+const serverMonitor=mountServerMonitor({
+ api,onAction:safe,formatBytes:bytes,
+ isActive:()=>view==='environment',isConnected:()=>connected,
+});
 function dependencyCard(c,platform){
  const na=platform==='macos'&&['显卡驱动','NVIDIA Toolkit'].includes(c.name);
  const names={'系统':'操作系统','显卡驱动':'NVIDIA 显卡驱动','容器引擎':'Docker 容器引擎','NVIDIA Toolkit':'NVIDIA 容器工具','企业网关':'Nginx 企业网关','证书工具':'OpenSSL 证书工具'};
@@ -105,36 +109,22 @@ function dependencyCard(c,platform){
  if(!na){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='诊断详情';const raw=document.createElement('pre');raw.textContent=detail;details.append(summary,raw);card.append(details);}return card;
 }
 async function fetchEnvironment(){managedServices=!!(await api('/services')).managed;managementSettings();
- const h=await api('/environment'),m=h.metrics||{};
- const time=m.sampled_unix?new Date(m.sampled_unix*1000).toLocaleTimeString():'未知';
- $('host-platform').textContent=(h.executor?'宿主机执行器已连接 · 单机部署 · 资源与依赖直接从服务器采集':h.containerized?'Docker 模式 · 系统资源来自容器所在 Linux 主机 / 虚拟机，NVIDIA 容器支持来自宿主机 Docker，其他工具版本来自控制台容器':h.platform==='macos'?'Mac 本地预览 · 当前页面显示 Mac 主机资源':'当前服务器资源')+' · 每 15 秒刷新 · 更新于 '+time;
- $('host-metrics').replaceChildren();
- const mem=m.memory,disk=m.disk;
- $('host-metrics').append(metricCard('内存占用',mem?bytes(mem.used_bytes)+' / '+bytes(mem.total_bytes):'暂无数据',mem?(mem.estimated?'估算占用；空闲及可回收约 ':'可用 ')+bytes(mem.available_bytes):'无法读取系统内存信息。',mem?mem.used_bytes/mem.total_bytes*100:null));
- $('host-metrics').append(metricCard('数据目录所在磁盘',disk?bytes(disk.available_bytes)+' 可用':'暂无数据',disk?'已用 '+bytes(disk.used_bytes)+' / 总计 '+bytes(disk.total_bytes):'无法读取磁盘信息。',disk?.used_percent));
- $('host-metrics').append(metricCard('系统负载 · 最近 1 分钟',m.load?m.load[0].toFixed(2):'暂无数据',m.load?`5 分钟 ${m.load[1].toFixed(2)} · 15 分钟 ${m.load[2].toFixed(2)} · ${m.logical_cpus??'未知'} 个逻辑核心。负载不是 CPU 使用率。`:'无法读取系统负载。'));
- const samples=await api('/telemetry'),last=samples?.at(-1);
- $('host-metrics').append(metricCard(h.executor?'宿主机执行器占用':'控制台自身占用',last?(last.console_rss_kib/1024).toFixed(1)+' MiB':'暂无数据',last?`CPU ${last.console_cpu_percent.toFixed(1)}% · 不含模型推理进程。`:'等待首次采样。'));
- $('host-gpus').replaceChildren();
- if(h.gpus?.length){for(const g of h.gpus)$('host-gpus').append(metricCard(g.name,(g.used_mib/1024).toFixed(1)+' / '+(g.total_mib/1024).toFixed(1)+' GiB',g.uuid,g.total_mib?g.used_mib/g.total_mib*100:null));}
- else $('host-gpus').append(metricCard(h.platform==='macos'?'本地 CPU 模式':'NVIDIA 显卡',h.platform==='macos'?'无需分配显卡':'未检测到显卡',h.platform==='macos'?'当前可使用 llama.cpp 进行小模型测试；服务器 vLLM 部署需要 NVIDIA GPU。':'请检查显卡驱动和设备是否可用。'));
- $('host-checks').replaceChildren();for(const c of h.checks){if(managedServices&&c.name==='企业网关')continue;$('host-checks').append(dependencyCard(c,h.platform));}
- const version=/^\d+\.\d+[^\s]*$/.test((h.vllm||'').trim());
- const engine=metricCard((h.engine_name||'vLLM')+' 推理引擎',version?h.vllm.trim():h.vllm?.startsWith('未运行')?'无运行中的推理引擎':'无法读取引擎版本',version?'当前运行实例中的实际版本。':'未运行时，版本由所选推理镜像决定；无需在控制台主机额外安装推理引擎。');
- if(!version&&h.vllm&&!h.vllm.startsWith('未运行')){const d=document.createElement('details');const s=document.createElement('summary');s.textContent='诊断详情';const p=document.createElement('pre');p.textContent=h.vllm;d.append(s,p);engine.append(d);}$('host-checks').append(engine);
+ const h=await api('/environment');
+ $('host-platform').textContent=h.platform==='macos'?'Mac 本地主机 · CPU 测试模式':h.executor?'宿主机执行器采样':h.containerized?'容器内采样 · 网络为容器命名空间，磁盘容量为数据目录挂载点':'当前服务器本机采样';
+ $('host-checks').replaceChildren();for(const c of h.checks){if(managedServices&&['网关','企业网关'].includes(c.name))continue;$('host-checks').append(dependencyCard(c,h.platform));}
  $('host-plan').replaceChildren();for(const s of h.plan){const li=document.createElement('li');li.textContent=s;$('host-plan').append(li);}
  const canSetup=h.host_setup_enabled&&h.platform==='linux';
  for(const id of ['prepare','repair-toolkit','verify-gpu']){$(id).disabled=!canSetup;$(id).title=canSetup?'':'需要连接宿主机执行器，不能在控制台容器内安装服务器依赖。';}
- $('host-policy').textContent=canSetup?'操作对象：当前服务器宿主机。Docker 和驱动由首次初始化准备；此处只安装或修复 NVIDIA 容器工具。推理镜像和模型权重在各自页面管理；Nginx 与鉴权在企业接入组件中部署。':'尚未连接宿主机执行器，此处操作不可用。请先安装并启动 phyxi-executor 服务。';
+ $('host-policy').textContent=canSetup?'操作对象：当前服务器宿主机。Docker 和驱动由首次初始化准备；此处只安装或修复 NVIDIA 容器工具。推理镜像和模型权重在各自页面管理；Nginx 与鉴权在接入组件中部署。':'尚未连接宿主机执行器，此处操作不可用。请先安装并启动 phyxi-executor 服务。';
 }
-async function inspect(){if(environmentBusy)return;environmentBusy=true;const b=$('inspect');b.disabled=true;b.textContent='正在检测…';try{await fetchEnvironment();}finally{environmentBusy=false;b.disabled=false;b.textContent='刷新资源与依赖检测';}}
+async function inspect(){if(environmentBusy)return;environmentBusy=true;const b=$('inspect');b.disabled=true;b.textContent='正在检测…';try{await Promise.all([fetchEnvironment(),serverMonitor.load()]);}finally{environmentBusy=false;b.disabled=false;b.textContent='刷新';}}
 $('inspect').onclick=safe(inspect);$('prepare').onclick=safe(()=>submit('prepare'));$('repair-toolkit').onclick=safe(()=>submit('repair_toolkit'));$('verify-gpu').onclick=safe(()=>submit('verify_gpu'));$('cancel').onclick=safe(async()=>{await api('/actions/cancel?job_id='+encodeURIComponent(activeJob),{method:'POST'});notice('已申请在安全边界取消。');});
 async function finishConnect(){await loadServices().catch(e=>notice(e.message,true));await load();connected=true;if(view==='images')await loadImageSources();if(view==='reports')renderReports();if(view==='audit')auditView().catch(e=>notice(e.message,true));if(view==='operations')await loadMaintenance();if(view==='logs'){configureLogs(location.hash.slice(1).split('/')[1],location.hash.slice(1).split('/')[2]||'');await loadLogs();}document.body.classList.remove('auth-pending');await refresh();if(view==='environment')await inspect();}
 $('logout').onclick=safe(async()=>{if(authMode==='password'){const r=await fetch('/api/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf}});if(!r.ok&&r.status!==401&&r.status!==403)throw Error('退出失败，请重试');}sessionStorage.removeItem('phyxi-token');connected=false;location.replace('/login');});
 async function initAuth(){const r=await fetch('/api/auth/info');if(!r.ok)throw Error('无法验证登录状态，请刷新重试');const data=await r.json();authMode=data.mode;if(authMode==='password'){sessionStorage.removeItem('phyxi-token');token='';if(!data.authenticated){location.replace('/login');return;}csrf=data.csrf;}else if(!token){location.replace('/login');return;}await finishConnect();}
 async function auditView(){auditRows=await api('/audit');renderAudit();}
 
-showView(location.hash.slice(1));initAuth().catch(e=>{document.body.classList.remove('auth-pending');notice(e.message,true);});setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);setInterval(()=>{if(connected&&!document.hidden&&view==='environment')inspect().catch(e=>notice(e.message,true));},15000);
+showView(location.hash.slice(1));initAuth().catch(e=>{document.body.classList.remove('auth-pending');notice(e.message,true);});setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},3000);
 
 async function loadGpuChoices(){
  const input=$('record-form').elements.gpu_uuids;
