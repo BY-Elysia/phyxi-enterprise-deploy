@@ -14,10 +14,12 @@ export function createRecordEditor({
  function editorField([key,title,type,fallback],data){
   const label=document.createElement('label');label.textContent=title;
   let input;
-  if(type.startsWith('ref:')||['engine','gpu-engine','endpoint','tls'].includes(type)){
+  if(type.startsWith('ref:')||['engine','gpu-engine','endpoint','tls','inference-mode','binary'].includes(type)){
    input=document.createElement('select');
    const {catalog,presets}=getResources();
    const options=type.startsWith('ref:')?[['','稍后选择'],...Object.entries(catalog[type.slice(4)]||{}).map(([id,r])=>[id,r.name])]:
+    type==='inference-mode'?[['container','容器镜像'],['native','本机 vLLM 环境'],['external','连接本机已有服务']]:
+    type==='binary'?[]:
     type==='endpoint'?presets.endpoints.map(p=>[p.url,p.name]):
     type==='gpu-engine'?[['vllm','vLLM'],['sglang','SGLang'],['lmdeploy','LMDeploy']]:
     type==='engine'?[['vllm','vLLM · NVIDIA'],['sglang','SGLang · NVIDIA'],['lmdeploy','LMDeploy · NVIDIA'],['llama_cpu','llama.cpp · CPU 测试']]:
@@ -166,7 +168,10 @@ export function createRecordEditor({
    }
   }
   if(!$('editor').open)$('editor').showModal();
-  if(kind==='deployments')loadGpuChoices().catch(e=>notice(e.message,true));
+  if(kind==='deployments'){
+   loadGpuChoices().catch(e=>notice(e.message,true));
+   mountInferenceMode(form,data);
+  }
  }
 
  $('close-editor').onclick=$('discard-editor').onclick=()=>$('editor').close();
@@ -202,7 +207,12 @@ export function createRecordEditor({
      const {model_name,source_repo,source_revision,source_file,source_endpoint}=data;
      data={model_name,model_path:'',source:{repo:source_repo,revision:source_revision||'main',file:source_file,endpoint:source_endpoint}};
     }
-    if(kind==='deployments')data.gpu_uuids=data.gpu_uuids.split(',').map(value=>value.trim()).filter(Boolean);
+    if(kind==='deployments'){
+     data.gpu_uuids=data.gpu_uuids.split(',').map(value=>value.trim()).filter(Boolean);
+     if(data.mode!=='native')data.native_binary='';
+     if(data.mode!=='container')data.image='';
+     if(data.mode==='external'){data.model='';data.runtime='';data.gpu_uuids=[];}
+    }
     if(kind==='gateways'){
      data.allowed_cidrs=data.allowed_cidrs.split(',').map(value=>value.trim()).filter(Boolean);
      const deployment=data.deployment;delete data.deployment;
@@ -285,6 +295,43 @@ export function createRecordEditor({
 
 
 
+ function mountInferenceMode(form,data){
+  const f=form.elements,mode=f.mode,binary=f.native_binary;
+  const feedback=document.createElement('p');feedback.className='hint';
+  const detect=editorButton('检测服务返回的模型',async()=>{
+   const port=f.port.value;
+   try{
+    const result=await api('/native-inference/'+encodeURIComponent(port)+'/models');
+    if(!mode.isConnected||f.port.value!==port||mode.value!=='external')return;
+    names.replaceChildren(...result.models.map(id=>new Option(id,id)));
+    if(!result.models.includes(f.model_name.value))f.model_name.value=result.models[0];
+    feedback.textContent='已检测到 '+result.models.length+' 个模型，请确认服务模型名。';
+   }catch(error){feedback.textContent=error.message;}
+  });
+  const names=document.createElement('datalist');names.id='native-service-models';
+  mode.parentElement.after(feedback,detect,names);
+  async function render(){
+   const native=mode.value==='native',external=mode.value==='external';
+   for(const field of ['model','runtime','gpu_uuids'])f[field].parentElement.hidden=external;
+   const gpuBox=form.querySelector('.gpu-list');if(gpuBox)gpuBox.hidden=external;
+   f.image.parentElement.hidden=native||external;binary.parentElement.hidden=!native;
+   detect.hidden=!external;
+   f.model_name.required=external;
+   f.model_name.setAttribute('list',external?names.id:'');
+   feedback.textContent=external?'填写宿主机的 API 端口并检测模型。平台只读取服务，不接管进程。':'';
+   if(native){
+    try{
+     const {binaries}=await api('/native-inference');
+     if(!mode.isConnected||mode.value!=='native')return;
+     binary.replaceChildren(...binaries.map(path=>new Option(path,path)));
+     if(binaries.includes(data.native_binary))binary.value=data.native_binary;
+     feedback.textContent=binaries.length?'请选择运行环境并确认 GPU 分配。':'执行器未发现 vLLM，可在安装时用 --vllm-bin 指定环境中的 bin/vllm。';
+    }catch(error){feedback.textContent=error.message;}
+   }
+  }
+  mode.onchange=render;render();
+ }
+
  async function loadGpuChoices(){
   const input=$('record-form').elements.gpu_uuids;
   const box=document.createElement('div');box.className='wide gpu-list';input.parentElement.after(box);
@@ -318,6 +365,6 @@ export function createRecordEditor({
  }
 
 
- function groupEditor(kind){const groups={models:[['模型标识',['model_name']],['下载来源',['source_repo','source_endpoint','source_revision','source_file']]],images:[['推理引擎与版本',['engine','reference']]],runtimes:[['推理引擎',['engine']],['资源与性能',['max_model_len','max_num_seqs','gpu_memory_utilization']],['解析器',['tool_parser','reasoning_parser']],['验收选项',['verify_tools','verify_images']]],deployments:[['服务标识',['model_name']],['选择独立配置',['model','image','runtime']],['资源分配',['gpu_uuids','port']]],gateways:[['关联服务',['deployment']],['HTTPS 入口',['domain','bind_ip','port']],['访问限制',['allowed_cidrs']],['TLS 证书',['tls_mode']]],workspaces:[['客户端连接',['gateway','credential_env']]]};const target=$('editor-fields');for(const [title,keys]of groups[kind]||[]){const heading=document.createElement('h3');heading.className='form-section-title';heading.textContent=title;target.append(heading);for(const key of keys){const input=$('record-form').elements[key];if(input)target.append(input.parentElement);}}}
+ function groupEditor(kind){const groups={models:[['模型标识',['model_name']],['下载来源',['source_repo','source_endpoint','source_revision','source_file']]],images:[['推理引擎与版本',['engine','reference']]],runtimes:[['推理引擎',['engine']],['资源与性能',['max_model_len','max_num_seqs','gpu_memory_utilization']],['解析器',['tool_parser','reasoning_parser']],['验收选项',['verify_tools','verify_images']]],deployments:[['运行方式',['mode','native_binary']],['服务标识',['model_name']],['选择独立配置',['model','image','runtime']],['资源分配',['gpu_uuids','port']]],gateways:[['关联服务',['deployment']],['HTTPS 入口',['domain','bind_ip','port']],['访问限制',['allowed_cidrs']],['TLS 证书',['tls_mode']]],workspaces:[['客户端连接',['gateway','credential_env']]]};const target=$('editor-fields');for(const [title,keys]of groups[kind]||[]){const heading=document.createElement('h3');heading.className='form-section-title';heading.textContent=title;target.append(heading);for(const key of keys){const input=$('record-form').elements[key];if(input)target.append(input.parentElement);}}}
  return {open:edit,customModel,chooseModelPreset,customImage,chooseImagePreset};
 }

@@ -12,6 +12,8 @@ pub struct Config {
     pub model_name: String,
     pub model_path: String,
     pub image: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub native_binary: String,
     pub gpu_uuids: Vec<String>,
     pub tensor_parallel: usize,
     pub max_model_len: u32,
@@ -35,6 +37,7 @@ impl Default for Config {
             model_name: "phyxi-model".into(),
             model_path: "/srv/phyxi/models/model".into(),
             image: "".into(),
+            native_binary: String::new(),
             gpu_uuids: vec![],
             tensor_parallel: 1,
             max_model_len: 8192,
@@ -102,7 +105,14 @@ impl Config {
             }
             return Ok(());
         }
-        crate::catalog::immutable_image_valid(&self.image)?;
+        if self.native_binary.is_empty() {
+            crate::catalog::immutable_image_valid(&self.image)?;
+        } else if self.engine != Engine::Vllm
+            || !self.image.is_empty()
+            || !std::path::Path::new(&self.native_binary).is_absolute()
+        {
+            return Err("原生 vLLM 配置无效".into());
+        }
         if self.gpu_uuids.is_empty()
             || self.gpu_uuids.len() > 16
             || self.gpu_uuids.len() != self.gpu_uuids.iter().collect::<HashSet<_>>().len()

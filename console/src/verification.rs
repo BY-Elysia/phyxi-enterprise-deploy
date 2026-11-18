@@ -77,6 +77,7 @@ pub async fn request(
         }
         format!("https://{}:{}{path}", gc.domain, gc.port)
     } else if std::env::var("PHYXI_MODEL_NETWORK").is_ok()
+        && c.native_binary.is_empty()
         && c.engine != crate::config::Engine::LlamaCpu
     {
         format!("http://phyxi-console-model:8000{path}")

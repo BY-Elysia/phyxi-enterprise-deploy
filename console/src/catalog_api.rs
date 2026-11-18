@@ -81,6 +81,30 @@ pub(crate) async fn catalog_put(
         }
         record.data = serde_json::to_value(model).map_err(|e| e.to_string())?;
     }
+    if kind == "deployments" {
+        let d: catalog::Deployment =
+            serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
+        let old = catalog::Catalog::load(&a.store)?
+            .data::<catalog::Deployment>("deployments", &id)
+            .ok();
+        if old.as_ref().is_some_and(|previous| previous.mode != d.mode) {
+            let status = a.runtime.status().await?;
+            if let Some(job) = status["job"].as_str() {
+                if a.store.setting(&format!("composition:{job}"))?["id"] == id {
+                    return Err("请先停止此部署再切换接入方式".to_string().into());
+                }
+            }
+        }
+        match d.mode {
+            native_inference::Mode::External => {
+                native_inference::probe(d.port, &d.model_name).await?;
+            }
+            native_inference::Mode::Native => {
+                native_inference::binary(&d.native_binary)?;
+            }
+            _ => {}
+        }
+    }
     if kind == "images" && options.local {
         let mut image: catalog::Image =
             serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
@@ -361,7 +385,9 @@ async fn prepared_config(a: &App, cat: &catalog::Catalog, id: &str) -> Result<Co
         return Ok(cat.compose(id, &a.runtime.data)?);
     }
     let mut c = draft;
-    if c.engine != config::Engine::LlamaCpu {
+    if !c.native_binary.is_empty() {
+        native_inference::binary(&c.native_binary)?;
+    } else if c.engine != config::Engine::LlamaCpu {
         let v = a.runtime.local_image(&c.image).await?;
         c.image = v["Id"].as_str().ok_or("镜像 ID 不存在".to_string())?.into();
     }

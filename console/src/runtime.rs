@@ -350,22 +350,6 @@ impl Runtime {
             "--entrypoint".into(),
             "vllm".into(),
             c.image.clone(),
-            "serve".into(),
-            "/model".into(),
-            "--host".into(),
-            "0.0.0.0".into(),
-            "--port".into(),
-            "8000".into(),
-            "--served-model-name".into(),
-            c.model_name.clone(),
-            "--tensor-parallel-size".into(),
-            c.tensor_parallel.to_string(),
-            "--max-model-len".into(),
-            c.max_model_len.to_string(),
-            "--max-num-seqs".into(),
-            c.max_num_seqs.to_string(),
-            "--gpu-memory-utilization".into(),
-            c.gpu_memory_utilization.to_string(),
         ];
         if let Ok(network) = std::env::var("PHYXI_MODEL_NETWORK") {
             let p = args.iter().position(|s| s == "--publish").unwrap();
@@ -373,8 +357,8 @@ impl Runtime {
             args[p + 1] = network;
         }
         if c.engine == Engine::Vllm {
-            args.push("--disable-log-requests".into());
-            args.extend(c.vllm.args());
+            args.extend(crate::vllm::serve_args(c, "/model", "0.0.0.0", 8000));
+            return args;
         }
         if c.engine == Engine::Sglang {
             let entry = args.iter().position(|a| a == "--entrypoint").unwrap();
@@ -434,9 +418,6 @@ impl Runtime {
             ]);
         }
         if !c.tool_parser.is_empty() {
-            if c.engine == Engine::Vllm {
-                args.push("--enable-auto-tool-choice".into());
-            }
             args.extend(["--tool-call-parser".into(), c.tool_parser.clone()]);
         }
         if !c.reasoning_parser.is_empty() {
@@ -537,10 +518,18 @@ impl Runtime {
         if ready["ready"] != true {
             return Err(ready["detail"].as_str().unwrap_or("权重未准备好").into());
         }
-        if self.inspect().await?.is_some() {
+        let no_local_docker = !c.native_binary.is_empty()
+            && self
+                .docker_host
+                .strip_prefix("unix://")
+                .is_some_and(|p| !std::path::Path::new(p).exists());
+        if !no_local_docker && self.inspect().await?.is_some() {
             return Err("已有模型容器；请先停止，配置修改不会自动中断服务".into());
         }
         self.idle(c).await?;
+        if !c.native_binary.is_empty() {
+            return crate::native_inference::start(self, c, id, store, cancel).await;
+        }
         step("2/4 检查已下载的推理引擎镜像（不会自动下载）")?;
         self.local_image(&c.image).await?;
         if cancel.load(Ordering::SeqCst) {

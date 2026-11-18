@@ -24,6 +24,7 @@ mod local_images;
 mod local_models;
 mod model_storage;
 mod monitor;
+mod native_inference;
 mod presets;
 mod process;
 mod pull_terminal;
@@ -127,6 +128,18 @@ async fn auth(State(a): State<App>, request: Request, next: Next) -> Response {
 }
 fn router(app: App) -> Router {
     let api = Router::new()
+        .route(
+            "/native-inference",
+            get(|| async { Json(json!({"binaries":native_inference::binaries()})) }),
+        )
+        .route(
+            "/native-inference/{port}/models",
+            get(|Path(port): Path<u16>| async move {
+                Ok::<_, Error>(Json(
+                    json!({"models":native_inference::models(port).await?}),
+                ))
+            }),
+        )
         .route(
             "/image-sources",
             get(|State(a): State<App>| async move {

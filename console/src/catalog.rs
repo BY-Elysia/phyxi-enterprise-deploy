@@ -54,6 +54,10 @@ pub struct Parameters {
 #[serde(deny_unknown_fields)]
 pub struct Deployment {
     #[serde(default)]
+    pub mode: crate::native_inference::Mode,
+    #[serde(default)]
+    pub native_binary: String,
+    #[serde(default)]
     pub model_name: String,
     pub model: String,
     pub image: String,
@@ -191,9 +195,19 @@ impl Catalog {
     }
     pub fn compose_draft(&self, id: &str, root: &Path) -> Result<Config, String> {
         let d: Deployment = self.data("deployments", id)?;
+        if d.mode == crate::native_inference::Mode::External {
+            return Err("已连接外部服务，启停由原管理方负责".into());
+        }
         let m: Model = self.data("models", &d.model)?;
         let r: Parameters = self.data("runtimes", &d.runtime)?;
-        let image = if r.engine != Engine::LlamaCpu {
+        if d.mode == crate::native_inference::Mode::Native
+            && (r.engine != Engine::Vllm || d.native_binary.is_empty())
+        {
+            return Err("请选择本机 vLLM 和对应的 vLLM 参数方案".into());
+        }
+        let image = if d.mode == crate::native_inference::Mode::Container
+            && r.engine != Engine::LlamaCpu
+        {
             let image = self.data::<Image>("images", &d.image)?;
             if image.engine != r.engine {
                 return Err("推理引擎镜像与参数的推理引擎不一致，请同时选择 vLLM 或 SGLang".into());
@@ -208,6 +222,11 @@ impl Catalog {
         };
         let c = Config {
             source: m.source,
+            native_binary: if d.mode == crate::native_inference::Mode::Native {
+                d.native_binary
+            } else {
+                String::new()
+            },
             engine: r.engine,
             model_name: if d.model_name.is_empty() {
                 m.model_name

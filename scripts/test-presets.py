@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """No network or GPU: preset metadata, explicit preparation, immutable local image and SGLang/LMDeploy contracts."""
-import importlib.util,json,os,pathlib,platform,socket,subprocess,tempfile,time,urllib.request,urllib.error
+import shutil,importlib.util,json,os,pathlib,platform,socket,subprocess,tempfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def fixture(name):
  spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/name);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
@@ -12,8 +12,20 @@ def main():
   docker_fixture = smoke.FAKE.replace("'architecture':'amd64'", "'architecture':" + repr(host_arch))
   for name,body in [('docker',docker_fixture),('nvidia-smi',smoke.FAKE),('curl',contract.CURL)]:
    path=bins/name;path.write_text(body);path.chmod(0o755)
+  native=bins/'vllm'
+  native.write_text("""#!/usr/bin/env python3
+import http.server,json,sys
+args=sys.argv[1:]
+port=int(args[args.index('--port')+1])
+name=args[args.index('--served-model-name')+1]
+class Handler(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  assert self.path=='/v1/models'
+  self.send_response(200);self.end_headers();self.wfile.write(json.dumps({'data':[{'id':name}]}).encode())
+http.server.HTTPServer(('127.0.0.1',port), Handler).serve_forever()
+""");native.chmod(0o755)
   with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-  env=os.environ.copy();env.update(PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
+  env=os.environ.copy();env.update(PHYXI_REAL_CURL=shutil.which('curl'),PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
   env.pop("PHYXI_HF_ENDPOINT",None)
   proc=subprocess.Popen([str(ROOT/'target/debug/phyxi-console')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);token=''
   def call(path,method='GET',data=None,status=200):
@@ -109,6 +121,32 @@ def main():
     time.sleep(.05)
    assert [results[k] for k in ids]==['cancelled','succeeded','succeeded'],results
    (d/'container.slow').unlink();task('pull_image','images','parallel-a')
+   assert str(native) in call('/native-inference')['binaries']
+   with socket.socket() as sock:
+    sock.bind(('127.0.0.1',0));native_port=sock.getsockname()[1]
+   external_process=subprocess.Popen([str(native),'serve','fixture','--port',str(native_port),'--served-model-name','existing'],stderr=subprocess.DEVNULL)
+   try:
+    for _ in range(100):
+     try:
+      with socket.create_connection(('127.0.0.1',native_port),.1):break
+     except OSError:time.sleep(.03)
+    external={**dep,'port':native_port,'model_name':'existing','mode':'external','gpu_uuids':[],'model':'','runtime':'','image':''}
+    assert call(f'/native-inference/{native_port}/models')['models']==['existing']
+    put('deployments','linked',external)
+    for action in ['start','redeploy','stop']:
+     call('/actions/'+action+'?kind=deployments&id=linked','POST',status=400)
+    call('/catalog/deployments/linked','DELETE')
+    assert external_process.poll() is None
+   finally:external_process.terminate();external_process.wait(timeout=5)
+   if os.geteuid()!=0:
+    runtime['engine']='vllm';put('runtimes','native',runtime)
+    native_dep={**dep,'mode':'native','native_binary':str(native),'image':'','port':native_port,'runtime':'native'}
+    put('deployments','native',native_dep)
+    task('start','deployments','native')
+    assert call(f'/native-inference/{native_port}/models')['models']==['fixture']
+    task('stop','deployments','native')
+    assert not any(cmd[0]=='run' and 'native' in cmd for cmd in commands())
+   print('PASS: native executable discovery, external service ownership and lifecycle fixtures')
    print('PASS: three parallel downloads, duplicate/capacity/lifecycle exclusion, targeted cancellation, unaffected peers and retry')
    print('PASS: backend presets, custom source metadata pinning without downloads, missing readiness, explicit pull, immutable image ID, engine mismatch and SGLang/LMDeploy startup contracts')
   finally:proc.terminate();proc.wait(timeout=10)

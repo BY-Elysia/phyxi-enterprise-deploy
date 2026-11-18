@@ -206,6 +206,40 @@ impl Options {
     }
 }
 
+pub fn serve_args(c: &crate::config::Config, model: &str, host: &str, port: u16) -> Vec<String> {
+    let mut args = vec![
+        "serve".into(),
+        model.into(),
+        "--host".into(),
+        host.into(),
+        "--port".into(),
+        port.to_string(),
+        "--served-model-name".into(),
+        c.model_name.clone(),
+        "--tensor-parallel-size".into(),
+        c.tensor_parallel.to_string(),
+        "--max-model-len".into(),
+        c.max_model_len.to_string(),
+        "--max-num-seqs".into(),
+        c.max_num_seqs.to_string(),
+        "--gpu-memory-utilization".into(),
+        c.gpu_memory_utilization.to_string(),
+        "--disable-log-requests".into(),
+    ];
+    args.extend(c.vllm.args());
+    if !c.tool_parser.is_empty() {
+        args.extend([
+            "--enable-auto-tool-choice".into(),
+            "--tool-call-parser".into(),
+            c.tool_parser.clone(),
+        ]);
+    }
+    if !c.reasoning_parser.is_empty() {
+        args.extend(["--reasoning-parser".into(), c.reasoning_parser.clone()]);
+    }
+    args
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

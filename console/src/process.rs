@@ -18,6 +18,7 @@ use std::{
 use tokio::process::{Child, Command};
 
 pub struct Managed {
+    pub unit: Option<String>,
     pub child: Child,
     pub config: Config,
     pub job: String,
@@ -27,7 +28,7 @@ impl Managed {
     pub fn status(&mut self) -> Result<Value, String> {
         let exit = self.child.try_wait().map_err(|e| e.to_string())?;
         Ok(
-            json!({"state":if exit.is_none(){"running"}else{"exited"},"engine":"llama_cpu","job":self.job,"model":self.config.model_name}),
+            json!({"state":if exit.is_none(){"running"}else{"exited"},"engine":self.config.engine,"job":self.job,"model":self.config.model_name}),
         )
     }
     pub fn logs(&self) -> Result<String, String> {
@@ -42,6 +43,17 @@ impl Managed {
     }
     pub async fn stop(&mut self) -> Result<(), String> {
         if self.child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            if let Some(unit) = &self.unit {
+                let mut cmd = Command::new("/usr/bin/systemctl");
+                cmd.args(["stop", unit]);
+                execute(cmd, None, 30).await?;
+            } else if !self.config.native_binary.is_empty() {
+                if let Some(pid) = self.child.id() {
+                    unsafe {
+                        libc::kill(-(pid as i32), libc::SIGKILL);
+                    }
+                }
+            }
             self.child.kill().await.map_err(|e| e.to_string())?;
         }
         Ok(())
@@ -104,6 +116,7 @@ pub async fn start_local(
         .spawn()
         .map_err(|e| e.to_string())?;
     *r.local.lock().await = Some(Managed {
+        unit: None,
         child,
         config: c.clone(),
         job: id.into(),

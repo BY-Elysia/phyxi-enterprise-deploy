@@ -3,6 +3,8 @@
 Run with a Python environment containing playwright, and --browser /path/to/chrome.
 """
 import argparse
+import http.server
+import threading
 import importlib.util
 import json
 import os
@@ -208,6 +210,32 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             recent.wait_for(state='attached')
             assert root_picker.input_value() == ''
             page.locator('#discard-editor').click()
+            class Existing(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    assert self.path == '/v1/models'
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'{"data":[{"id":"existing-model"}]}')
+                def log_message(self, *args): pass
+            with http.server.ThreadingHTTPServer(('127.0.0.1',0), Existing) as server:
+                threading.Thread(target=server.serve_forever,daemon=True).start()
+                try:
+                    page.goto(f'http://127.0.0.1:{port}/#deployments')
+                    page.locator('#create').click()
+                    form=page.locator('#record-form')
+                    form.locator('[name=mode]').select_option('native')
+                    assert form.locator('[name=native_binary]').is_visible()
+                    form.locator('[name=mode]').select_option('external')
+                    assert not form.locator('[name=image]').is_visible()
+                    form.locator('[name=port]').fill(str(server.server_port))
+                    form.get_by_role('button',name='检测服务返回的模型').click()
+                    form.get_by_text("已检测到 1 个模型，请确认服务模型名。").wait_for()
+                    assert form.locator("[name=model_name]").input_value()=="existing-model"
+                    form.locator('[name=record_name]').fill('existing service')
+                    form.locator('[type=submit]').click()
+                    page.get_by_text('模型可用',exact=True).wait_for()
+                    assert page.get_by_role('button',name='停止模型服务',exact=True).count()==0
+                finally:server.shutdown()
             assert not errors, errors
             browser.close()
         print('PASS: catalog/filter/pagination/logos, preset and custom forms, save without download, pinned revision, explicit fixture download, saved library, mobile layout, absolute path validation, explicit server roots and GGUF selection')
