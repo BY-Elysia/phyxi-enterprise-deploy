@@ -23,7 +23,7 @@ http.server.HTTPServer(('127.0.0.1',port),Handler).serve_forever()
 '''
 CURL=r'''#!/usr/bin/env python3
 import sys,json,hashlib,os,pathlib,time
-args=sys.argv[1:];urls=[x for x in args if x.startswith('https://huggingface.co/')]
+args=sys.argv[1:];urls=[x for x in args if x.startswith(('https://hf-mirror.com/','https://huggingface.co/'))]
 if not urls:os.execv(os.environ['PHYXI_REAL_CURL'],[os.environ['PHYXI_REAL_CURL'],*args])
 url=urls[0];data=b'fixture-gguf'
 if '/api/models/' in url:

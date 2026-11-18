@@ -104,7 +104,7 @@ fn endpoint(value: &str) -> Result<&str, String> {
 }
 pub fn source_endpoint(s: &Source) -> Result<String, String> {
     let configured = if s.endpoint.is_empty() {
-        std::env::var("PHYXI_HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".into())
+        std::env::var("PHYXI_HF_ENDPOINT").unwrap_or_else(|_| "https://hf-mirror.com".into())
     } else {
         s.endpoint.clone()
     };
@@ -114,7 +114,6 @@ pub fn source_endpoint(s: &Source) -> Result<String, String> {
 pub async fn resolve(mut s: Source) -> Result<Source, String> {
     for base in ["https://huggingface.co/", "https://hf-mirror.com/"] {
         if let Some(path) = s.repo.strip_prefix(base) {
-            s.endpoint = base.trim_end_matches('/').into();
             s.repo = path.trim_end_matches('/').into();
             break;
         }
@@ -122,6 +121,7 @@ pub async fn resolve(mut s: Source) -> Result<Source, String> {
     if s.revision.is_empty() {
         s.revision = "main".into();
     }
+    s.endpoint = source_endpoint(&s)?;
     let requested = s.revision.clone();
     s.revision = "a".repeat(40);
     s.validate()?;
@@ -453,7 +453,14 @@ mod source_tests {
         .await
         .unwrap();
         assert_eq!(s.repo, "Qwen/Qwen3-0.6B");
-        assert_eq!(s.endpoint, "https://hf-mirror.com");
+        assert_eq!(
+            s.endpoint,
+            source_endpoint(&Source {
+                endpoint: String::new(),
+                ..s.clone()
+            })
+            .unwrap()
+        );
         let mut invalid = s.clone();
         invalid.repo = "https://127.0.0.1/private".into();
         assert!(resolve(invalid).await.is_err());

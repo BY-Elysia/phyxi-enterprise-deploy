@@ -26,7 +26,7 @@ let managedServices=false,filterText='',jobsSignature='',environmentBusy=false,d
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},connected=false,busy=false,jobs=[],activeJob='',runtime={};
 
 const fields={
- models:[['model_name','默认服务模型名','text','phyxi-model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint','https://huggingface.co'],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
+ models:[['model_name','默认服务模型名','text','phyxi-model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint',''],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
  images:[['engine','推理引擎','gpu-engine','vllm'],['reference','Docker 镜像地址（标签或摘要）','text','']],
  runtimes:[['engine','推理引擎','engine','vllm'],['max_model_len','上下文长度','number',8192],['max_num_seqs','最大并发序列','number',8],['gpu_memory_utilization','显存使用比例','decimal',0.85],['tool_parser','工具解析器（可选）','optional',''],['reasoning_parser','思考解析器（可选）','optional',''],['verify_tools','验收工具调用','checkbox',false],['verify_images','验收图片理解','checkbox',false]],
  deployments:[['model_name','API 服务模型名（留空使用权重配置的默认值）','optional',''],['model','模型权重','ref:models',''],['image','推理引擎镜像（CPU 可留空）','ref:images',''],['runtime','推理参数方案','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','原生模式 API 端口（容器内固定 8000）','number',18000]],
@@ -335,7 +335,7 @@ $('services-start').onclick=safe(()=>submit('services_start'));$('services-stop'
 
 
 let defaultGatewayImage='';
-async function loadImageSources(fill=false){const sequence=++imageSourceLoadSequence;const data=await api('/image-sources');if(sequence!==imageSourceLoadSequence)return;defaultGatewayImage=data.default_gateway_image;if(fill){$('image-source-mode').value=data.config.mode;$('image-source-prefix').value=data.config.mirror_prefix;$('gateway-image-reference').value=data.config.gateway_image;$('gateway-image-mode').value=data.config.gateway_image===defaultGatewayImage?'default':'custom';imageSourceMode();gatewayImageMode();}$('image-settings').textContent='下载来源：'+({default:'默认',enterprise:'镜像仓库',direct:'原始地址'}[data.config.mode]||data.config.mode)+' · 设置';}
+async function loadImageSources(fill=false){const sequence=++imageSourceLoadSequence;const data=await api('/image-sources');if(sequence!==imageSourceLoadSequence)return;defaultGatewayImage=data.default_gateway_image;if(fill){$('image-source-mode').value=data.config.mode;$('image-source-prefix').value=data.config.mirror_prefix;$('gateway-image-reference').value=data.config.gateway_image;$('gateway-image-mode').value=data.config.gateway_image===defaultGatewayImage?'default':'custom';imageSourceMode();gatewayImageMode();}$('image-settings').textContent='下载来源：'+({default:'DaoCloud 镜像',enterprise:'镜像仓库',direct:'原始地址'}[data.config.mode]||data.config.mode)+' · 设置';}
 
 function imageSourceMode(){$('image-prefix-field').hidden=$('image-source-mode').value!=='enterprise';$('image-source-prefix').required=$('image-source-mode').value==='enterprise';}
 function gatewayImageMode(){const custom=$('gateway-image-mode').value==='custom';$('gateway-image-field').hidden=!custom;$('gateway-image-reference').required=custom;}
