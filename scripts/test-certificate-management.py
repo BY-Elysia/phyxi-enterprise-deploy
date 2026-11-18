@@ -107,6 +107,12 @@ def main():
             upload({**body,'certificate':valid.split('-----END CERTIFICATE-----')[0]+'-----END CERTIFICATE-----\n'},400)
             upload({**body,'request_id':'','private_key':ca_key.read_text()},400)
             upload({**body,'certificate':'x'*65537},400)
+            # Public-CA mode only trusts the built-in ISRG roots. Supplying a
+            # private root alongside the public mode or omitting it in custom mode fails.
+            public = {'certificate':valid, 'private_key':private.read_text(), 'use_lets_encrypt':True}
+            upload(public,400)
+            upload({**public, 'ca':ca.read_text()},400)
+            upload({**public, 'use_lets_encrypt':False},400)
             upload(body)
             configured=record()
             assert call('/gateways/gateway/certificate')['valid']

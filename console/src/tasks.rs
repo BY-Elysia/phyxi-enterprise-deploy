@@ -183,7 +183,7 @@ pub async fn run(
             }
             let via_gateway = gateway.running().await?;
             if action == "publish" && !via_gateway {
-                return Err("发布需要启动企业网关，并通过网关重新验收".into());
+                return Err("发布需要启动网关，并通过网关重新验收".into());
             }
             if via_gateway {
                 gateway.matches(g, &active).await?;
