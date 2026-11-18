@@ -78,6 +78,8 @@ impl Sources {
             "vllm/vllm-openai@",
             "lmsysorg/sglang:",
             "lmsysorg/sglang@",
+            "openmmlab/lmdeploy:",
+            "openmmlab/lmdeploy@",
         ]
         .iter()
         .any(|p| repo.starts_with(p))

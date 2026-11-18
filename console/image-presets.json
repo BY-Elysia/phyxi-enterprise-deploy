@@ -1,0 +1,162 @@
+[
+  {
+    "id": "vllm",
+    "name": "vLLM",
+    "engine": "vllm",
+    "reference": "vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c",
+    "default_version": "v0.11.0",
+    "repository": "vllm/vllm-openai",
+    "description": "通用 LLM 与视觉语言模型服务，适合高吞吐推理。",
+    "homepage": "https://docs.vllm.ai/en/latest/deployment/docker/",
+    "versions": [
+      {
+        "version": "v0.11.0",
+        "reference": "vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c",
+        "tag_reference": "vllm/vllm-openai:v0.11.0",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2025-10-06",
+        "source": "https://hub.docker.com/v2/repositories/vllm/vllm-openai/tags/v0.11.0"
+      },
+      {
+        "version": "v0.34.0",
+        "reference": "vllm/vllm-openai@sha256:20fdb089454afbb324efa4110a2c025ff7b27cc1a086e07aa580b18df8ad1ce1",
+        "tag_reference": "vllm/vllm-openai:v0.34.0",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2026-11-16",
+        "source": "https://hub.docker.com/v2/repositories/vllm/vllm-openai/tags/v0.34.0"
+      },
+      {
+        "version": "v0.33.0",
+        "reference": "vllm/vllm-openai@sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e",
+        "tag_reference": "vllm/vllm-openai:v0.33.0",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2026-11-02",
+        "source": "https://hub.docker.com/v2/repositories/vllm/vllm-openai/tags/v0.33.0"
+      },
+      {
+        "version": "v0.12.0",
+        "reference": "vllm/vllm-openai@sha256:6766ce0c459e24b76f3e9ba14ffc0442131ef4248c904efdcbf0d89e38be01fe",
+        "tag_reference": "vllm/vllm-openai:v0.12.0",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2025-12-03",
+        "source": "https://hub.docker.com/v2/repositories/vllm/vllm-openai/tags/v0.12.0"
+      }
+    ],
+    "note": "版本已固定镜像摘要；下载后选择同类型推理参数。GPU 兼容性需实机验收。",
+    "verified_at": "2026-11-17"
+  },
+  {
+    "id": "sglang",
+    "name": "SGLang",
+    "engine": "sglang",
+    "reference": "lmsysorg/sglang@sha256:5877b90ffcdba23b6072ee90a2f3ab046e926be19dd828074a6956a0c6c77ba5",
+    "default_version": "v0.5.5",
+    "repository": "lmsysorg/sglang",
+    "description": "面向生成式模型的高效推理，支持结构化输出与多模态。",
+    "homepage": "https://docs.sglang.ai/",
+    "versions": [
+      {
+        "version": "v0.5.5",
+        "reference": "lmsysorg/sglang@sha256:5877b90ffcdba23b6072ee90a2f3ab046e926be19dd828074a6956a0c6c77ba5",
+        "tag_reference": "lmsysorg/sglang:v0.5.5",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2025-11-06",
+        "source": "https://hub.docker.com/v2/repositories/lmsysorg/sglang/tags/v0.5.5"
+      },
+      {
+        "version": "v0.5.22",
+        "reference": "lmsysorg/sglang@sha256:e3a4f06001a29542fc4a8638536d9ffc5eb9c9942b08603c09b19a56eae4a1ae",
+        "tag_reference": "lmsysorg/sglang:v0.5.22",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2026-10-16",
+        "source": "https://hub.docker.com/v2/repositories/lmsysorg/sglang/tags/v0.5.22"
+      },
+      {
+        "version": "v0.5.19-cu129",
+        "reference": "lmsysorg/sglang@sha256:59e11312666e1c5c155210ea335589b91daa0d70848521b390b93b1b1e8fb0ef",
+        "tag_reference": "lmsysorg/sglang:v0.5.19-cu129",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2026-09-04",
+        "source": "https://hub.docker.com/v2/repositories/lmsysorg/sglang/tags/v0.5.19-cu129"
+      },
+      {
+        "version": "v0.5.6.post2",
+        "reference": "lmsysorg/sglang@sha256:09bb578bc4beaeb81a269f72950ff3daba1ea50189a09388466d89cbc4bae228",
+        "tag_reference": "lmsysorg/sglang:v0.5.6.post2",
+        "platforms": [
+          "amd64",
+          "arm64"
+        ],
+        "published": "2025-12-11",
+        "source": "https://hub.docker.com/v2/repositories/lmsysorg/sglang/tags/v0.5.6.post2"
+      }
+    ],
+    "note": "版本已固定镜像摘要；下载后选择同类型推理参数。GPU 兼容性需实机验收。",
+    "verified_at": "2026-11-17"
+  },
+  {
+    "id": "lmdeploy",
+    "name": "LMDeploy",
+    "engine": "lmdeploy",
+    "reference": "openmmlab/lmdeploy@sha256:90bd451a49b56f68d953f0b49d6011b0419e043ececa0265c1e3cdb920748f4f",
+    "default_version": "v0.18.0-cu12.8",
+    "repository": "openmmlab/lmdeploy",
+    "description": "OpenMMLab 推理工具链；本控制台使用 PyTorch 后端。",
+    "homepage": "https://lmdeploy.readthedocs.io/en/latest/",
+    "versions": [
+      {
+        "version": "v0.18.0-cu12.8",
+        "reference": "openmmlab/lmdeploy@sha256:90bd451a49b56f68d953f0b49d6011b0419e043ececa0265c1e3cdb920748f4f",
+        "tag_reference": "openmmlab/lmdeploy:v0.18.0-cu12.8",
+        "platforms": [
+          "amd64"
+        ],
+        "published": "2026-09-28",
+        "source": "https://hub.docker.com/v2/repositories/openmmlab/lmdeploy/tags/v0.18.0-cu12.8"
+      },
+      {
+        "version": "v0.17.0-cu12.8",
+        "reference": "openmmlab/lmdeploy@sha256:52beaae7673f8d3a9eaed8b444af09b494a09b345066bc424cf75f1a7c18f719",
+        "tag_reference": "openmmlab/lmdeploy:v0.17.0-cu12.8",
+        "platforms": [
+          "amd64"
+        ],
+        "published": "2026-09-01",
+        "source": "https://hub.docker.com/v2/repositories/openmmlab/lmdeploy/tags/v0.17.0-cu12.8"
+      },
+      {
+        "version": "v0.12.2-cu12.8",
+        "reference": "openmmlab/lmdeploy@sha256:941e4506df3f077142ae1f3ca84aff0ecf7578831dc9d8e033d232e3c9ac5f73",
+        "tag_reference": "openmmlab/lmdeploy:v0.12.2-cu12.8",
+        "platforms": [
+          "amd64"
+        ],
+        "published": "2026-03-18",
+        "source": "https://hub.docker.com/v2/repositories/openmmlab/lmdeploy/tags/v0.12.2-cu12.8"
+      }
+    ],
+    "note": "版本已固定镜像摘要；下载后选择同类型推理参数。GPU 兼容性需实机验收。LMDeploy 使用 KV 缓存占空闲显存比例，与 vLLM 总显存比例含义不同。",
+    "verified_at": "2026-11-17"
+  }
+]
