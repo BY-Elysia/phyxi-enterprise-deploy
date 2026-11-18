@@ -163,3 +163,7 @@ python3 scripts/test-composition.py
 ### 模型广场
 
 模型权重页面提供 23 个 Qwen、GLM、DeepSeek 官方来源预设，支持按品牌、文本/图像理解能力及参数规模筛选。卡片展示官方标识、标称参数、MoE 激活参数和快照权重体积；选择后保存来源，再显式下载。已添加模型仍可管理本地文件与自定义仓库。模型列表、数据来源、后端兼容边界与验证方式见 [模型广场](docs/model-catalog.md)。
+
+### 推理镜像目录
+
+vLLM、SGLang、LMDeploy 提供卡片目录和 11 个固定版本，选择后保存配置，再显式下载。支持自定义地址，已添加镜像独立管理。LMDeploy 使用 PyTorch 后端；版本、平台与兼容边界见 [推理镜像目录](docs/image-catalog.md)。

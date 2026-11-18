@@ -3,9 +3,9 @@ use serde_json::{json, Value};
 pub fn list() -> Value {
     let models: Value = serde_json::from_str(include_str!("../model-presets.json"))
         .expect("bundled model presets must be valid JSON");
-    json!({"vllm_parameters":crate::vllm::schema(),"images":[
- {"id":"vllm","name":"vLLM v0.11.0 · 官方镜像摘要","engine":"vllm","reference":"vllm/vllm-openai@sha256:014a95f21c9edf6abe0aea6b07353f96baa4ec291c427bb1176dc7c93a85845c","note":"NVIDIA GPU 用；先下载，再部署。版本可自行修改。"},
- {"id":"sglang","name":"SGLang v0.5.5 · 官方镜像摘要","engine":"sglang","reference":"lmsysorg/sglang@sha256:5877b90ffcdba23b6072ee90a2f3ab046e926be19dd828074a6956a0c6c77ba5","note":"NVIDIA GPU 用；需搭配 SGLang 推理参数。"}],
+    let images: Value = serde_json::from_str(include_str!("../image-presets.json"))
+        .expect("bundled image presets must be valid JSON");
+    json!({"vllm_parameters":crate::vllm::schema(),"images":images,
  "models":models,
  "endpoints":[{"name":"Hugging Face 官方","url":"https://huggingface.co"},{"name":"国内镜像 hf-mirror","url":"https://hf-mirror.com"}]})
 }
@@ -58,5 +58,31 @@ mod tests {
             .iter()
             .any(|m| m["parameters_b"].as_f64().unwrap() > 100.0));
         assert!(models.iter().any(|m| m["modality"] == "vision"));
+    }
+
+    #[test]
+    fn image_versions_are_unique_pinned_and_have_a_valid_default() {
+        let catalog = list();
+        let mut engines = HashSet::new();
+        for image in catalog["images"].as_array().unwrap() {
+            assert!(engines.insert(image["engine"].as_str().unwrap()));
+            let versions = image["versions"].as_array().unwrap();
+            let mut names = HashSet::new();
+            for version in versions {
+                assert!(names.insert(version["version"].as_str().unwrap()));
+                let reference = version["reference"].as_str().unwrap();
+                let (repo, digest) = reference.split_once("@sha256:").unwrap();
+                assert_eq!(repo, image["repository"]);
+                assert_eq!(digest.len(), 64);
+                assert!(digest.bytes().all(|b| b.is_ascii_hexdigit()));
+                assert!(!version["platforms"].as_array().unwrap().is_empty());
+            }
+            let default = versions
+                .iter()
+                .find(|v| v["version"] == image["default_version"])
+                .unwrap();
+            assert_eq!(default["reference"], image["reference"]);
+        }
+        assert_eq!(engines, HashSet::from(["vllm", "sglang", "lmdeploy"]));
     }
 }

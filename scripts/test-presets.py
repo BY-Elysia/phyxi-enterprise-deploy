@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""No network or GPU: preset metadata, explicit preparation, immutable local image and SGLang contract."""
+"""No network or GPU: preset metadata, explicit preparation, immutable local image and SGLang/LMDeploy contracts."""
 import importlib.util,json,os,pathlib,platform,socket,subprocess,tempfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def fixture(name):
@@ -40,7 +40,7 @@ def main():
    assert json.loads((d/'state/image-sources.json').read_text())==enterprise
    call('/image-sources','PUT',{**enterprise,'mirror_prefix':'https://bad.example'},status=400)
    call('/image-sources','PUT',sources['config'])
-   assert {x['engine'] for x in presets['images']}=={'vllm','sglang'}
+   assert {x['engine'] for x in presets['images']}=={'vllm','sglang','lmdeploy'}
    assert any('GLM' in x['name'] for x in presets['models']) and any('Qwen' in x['name'] for x in presets['models'])
    assert len(presets['models']) >= 20
    assert {m['brand'] for m in presets['models']} == {'Qwen','GLM','DeepSeek'}
@@ -61,7 +61,7 @@ def main():
    dep={'model':'local','image':'v','runtime':'r','gpu_uuids':['GPU-00000000-0000-0000-0000-000000000001'],'port':18000};put('deployments','d',dep)
    (d/'container.missing-image').touch();call('/actions/start?kind=deployments&id=d','POST',status=400)
    assert not any(cmd[0]=='pull' for cmd in commands())
-   pulled=task('pull_image','images','v');assert pulled['progress']['layers']=={'abcdef123456':'已就绪'};assert 'pending' not in pulled['progress'];assert pulled['progress']['percent'] is None;assert pulled['progress']['bytes_ready']==pulled['progress']['bytes_total']==1000000;assert 'escape_state' not in pulled['progress'];assert 'expected_bytes' not in pulled['progress']
+   pulled=task('pull_image','images','v');assert pulled['progress']['layers']=={'abcdef123456':'已就绪'},pulled['progress'];assert 'pending' not in pulled['progress'];assert pulled['progress']['percent'] is None,pulled['progress'];assert pulled['progress']['bytes_ready']==pulled['progress']['bytes_total']==1000000,pulled['progress'];assert 'escape_state' not in pulled['progress'];assert 'expected_bytes' not in pulled['progress']
    assert call('/images/v/status')['available']
    assert commands()[-1]  # inspect executed after pull
    assert any(cmd==['pull','m.daocloud.io/docker.io/'+vllm['reference'].removeprefix('docker.io/')] for cmd in commands())
@@ -71,7 +71,15 @@ def main():
    call('/actions/start?kind=deployments&id=d','POST',status=400)
    put('images','s',{'engine':'sglang','reference':presets['images'][1]['reference']});dep['image']='s';put('deployments','d',dep,1)
    task('start','deployments','d');task('stop','deployments','d')
-   runs=[cmd for cmd in commands() if cmd[0]=='run'];assert len(runs)==2
+   runtime['engine']='lmdeploy';put('runtimes','r',runtime,2)
+   put('images','l',{'engine':'lmdeploy','reference':presets['images'][2]['reference']});dep['image']='l';put('deployments','d',dep,2)
+   started=task('start','deployments','d');assert started['config']['image']=='sha256:'+'b'*64
+   task('stop','deployments','d')
+   runs=[cmd for cmd in commands() if cmd[0]=='run'];assert len(runs)==3
+   lm=runs[2]
+   for flag,value in [('--entrypoint','lmdeploy'),('--backend','pytorch'),('--session-len',str(runtime['max_model_len'])),('--max-batch-size',str(runtime['max_num_seqs'])),('--cache-max-entry-count',str(runtime['gpu_memory_utilization'])),('--max-log-len','0')]:
+    assert lm[lm.index(flag)+1]==value,(flag,lm)
+   assert 'api_server' in lm and '--max-model-len' not in lm and '--mem-fraction-static' not in lm
    assert 'sglang.launch_server' in runs[1] and '--mem-fraction-static' in runs[1] and '--max-model-len' not in runs[1]
    assert all(cmd[cmd.index('--pull')+1]=='never' and 'HF_HUB_OFFLINE=1' in cmd for cmd in runs)
    assert len([cmd for cmd in commands() if cmd[0]=='pull'])==1,'only explicit preparation may pull'
@@ -100,6 +108,6 @@ def main():
    assert [results[k] for k in ids]==['cancelled','succeeded','succeeded'],results
    (d/'container.slow').unlink();task('pull_image','images','parallel-a')
    print('PASS: three parallel downloads, duplicate/capacity/lifecycle exclusion, targeted cancellation, unaffected peers and retry')
-   print('PASS: backend presets, custom source metadata pinning without downloads, missing readiness, explicit pull, immutable image ID, engine mismatch and SGLang startup contract')
+   print('PASS: backend presets, custom source metadata pinning without downloads, missing readiness, explicit pull, immutable image ID, engine mismatch and SGLang/LMDeploy startup contracts')
   finally:proc.terminate();proc.wait(timeout=10)
 if __name__=='__main__':main()

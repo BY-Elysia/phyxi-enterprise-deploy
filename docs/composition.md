@@ -33,9 +33,11 @@
 - `GET /api/catalog`：读取独立配置库。
 - `PUT /api/catalog/{kind}/{id}`：`{"name":"名称","revision":0,"data":{...}}`；创建修订为 0，更新传读取到的修订号。
 - 从服务器添加已有权重时，PUT 加 `local=true`，提交服务器绝对路径，路径可由浏览接口返回。检测目录配置、权重分片或 GGUF 文件头通过后保存。
+- 从服务器添加已有镜像时，PUT 加 `local=true` 并提交检测到的本地镜像 ID。保存时复核引擎、平台和 ID。
 - `DELETE /api/catalog/{kind}/{id}`：被引用或运行中的对象拒绝删除。
 - `GET /api/deployments/{id}/preview`：检查组合并返回最终 Config 和依赖快照。
 - `GET /api/images/{id}/status`：读取本地 Docker 镜像 ID、架构、大小及标签，不启动容器。
+- `GET /api/images/local?engine=vllm`：检测系统 Docker 中平台匹配、仓库名可识别的 vLLM 镜像，返回标签、架构、大小和不可变 ID。也支持 `sglang` 与 `lmdeploy`。直接运行的 Python 进程不属于镜像。
 - `GET /api/workspaces/{id}/export`：返回入口、模型、凭据环境变量、CA 路径提示和 OpenCode 模板；不含私钥和真实令牌。
 - `POST /api/actions/{action}?kind={kind}&id={id}`：作用于明确对象的操作。
   - models：download

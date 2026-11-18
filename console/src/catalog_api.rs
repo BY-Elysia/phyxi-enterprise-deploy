@@ -73,6 +73,19 @@ pub(crate) async fn catalog_put(
         }
         record.data = serde_json::to_value(model).map_err(|e| e.to_string())?;
     }
+    if kind == "images" && options.local {
+        let mut image: catalog::Image =
+            serde_json::from_value(record.data.clone()).map_err(|e| e.to_string())?;
+        let checked = a
+            .runtime
+            .checked_local_image(&image.reference, &image.engine)
+            .await?;
+        if record.name.trim().is_empty() {
+            record.name = checked.reference.chars().take(80).collect();
+        }
+        image.reference = checked.id;
+        record.data = serde_json::to_value(image).map_err(|e| e.to_string())?;
+    }
     let _catalog = a.catalog_gate.lock().await;
     let mut cat = catalog::Catalog::load(&a.store)?;
     cat.put(&kind, &id, record)?;
@@ -90,6 +103,19 @@ pub(crate) async fn local_model_paths(
     Ok(Json(result))
 }
 
+#[derive(Deserialize)]
+pub(crate) struct LocalImagesQuery {
+    engine: Option<config::Engine>,
+}
+pub(crate) async fn local_images(
+    State(a): State<App>,
+    Query(query): Query<LocalImagesQuery>,
+) -> Result<Json<Value>> {
+    let engine = query.engine.unwrap_or_default();
+    Ok(Json(
+        json!({"images":a.runtime.discover_local_images(&engine).await?}),
+    ))
+}
 pub(crate) async fn catalog_delete(
     State(a): State<App>,
     Path((kind, id)): Path<(String, String)>,
@@ -206,6 +232,11 @@ pub(crate) async fn resolve_action(
         ("images", "pull_image") => {
             let i: catalog::Image = cat.data(kind, id)?;
             catalog::image_valid(&i.reference)?;
+            if i.reference.starts_with("sha256:") {
+                return Err("本机镜像 ID 没有下载地址；请重新检测或添加仓库来源"
+                    .to_string()
+                    .into());
+            }
             Config {
                 image: i.reference,
                 ..Config::default()

@@ -20,6 +20,7 @@ mod host_metrics;
 mod host_setup;
 mod image_sources;
 mod job_control;
+mod local_images;
 mod local_models;
 mod presets;
 mod process;
@@ -188,6 +189,7 @@ fn router(app: App) -> Router {
         .route("/deployments/{id}/preview", get(deployment_preview))
         .route("/workspaces/{id}/export", get(workspace_export))
         .route("/images/{id}/status", get(image_status))
+        .route("/images/local", get(catalog_api::local_images))
         .route("/config", get(config_get).put(config_save))
         .route("/gpus", get(gpus))
         .route("/environment", get(environment_get))

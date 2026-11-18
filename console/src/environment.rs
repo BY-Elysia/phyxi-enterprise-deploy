@@ -98,6 +98,9 @@ pub async fn inspect(r: &Runtime) -> serde_json::Value {
                 let package = if v["Config"]["Labels"]["io.phyxi.console.engine"] == "sglang" {
                     engine_name = "SGLang";
                     "sglang"
+                } else if v["Config"]["Labels"]["io.phyxi.console.engine"] == "lmdeploy" {
+                    engine_name = "LMDeploy";
+                    "lmdeploy"
                 } else {
                     "vllm"
                 };

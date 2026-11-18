@@ -55,6 +55,7 @@ pub enum Engine {
     #[default]
     Vllm,
     Sglang,
+    Lmdeploy,
     LlamaCpu,
 }
 

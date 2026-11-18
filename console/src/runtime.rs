@@ -142,6 +142,85 @@ impl Runtime {
         crate::catalog::immutable_image_valid(v["Id"].as_str().ok_or("本地镜像缺少 ID")?)?;
         Ok(v)
     }
+    pub async fn checked_local_image(
+        &self,
+        id: &str,
+        engine: &Engine,
+    ) -> Result<crate::local_images::LocalImage, String> {
+        if !id.starts_with("sha256:") {
+            return Err("请从检测列表选择本机 Docker 镜像 ID".into());
+        }
+        let image = self.local_image(id).await?;
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            other => other,
+        };
+        if image["Os"] != "linux" || image["Architecture"] != arch {
+            return Err("该镜像的平台与部署服务器不匹配".into());
+        }
+        let reference = ["RepoTags", "RepoDigests"]
+            .into_iter()
+            .filter_map(|key| image[key].as_array())
+            .flatten()
+            .filter_map(Value::as_str)
+            .find(|reference| {
+                let repository = if let Some((repository, _)) = reference.split_once('@') {
+                    repository
+                } else {
+                    reference
+                        .rsplit_once(':')
+                        .map_or(*reference, |(repository, _)| repository)
+                };
+                crate::local_images::image_engine(repository).as_ref() == Some(engine)
+            })
+            .ok_or("镜像标签无法识别为所选推理引擎")?;
+        Ok(crate::local_images::LocalImage {
+            reference: reference.into(),
+            engine: engine.clone(),
+            id: image["Id"].as_str().ok_or("镜像 ID 不存在")?.into(),
+            architecture: arch.into(),
+            size_bytes: image["Size"].as_u64().unwrap_or_default(),
+        })
+    }
+    pub async fn discover_local_images(
+        &self,
+        engine: &Engine,
+    ) -> Result<Vec<crate::local_images::LocalImage>, String> {
+        let output = self
+            .call(
+                vec![
+                    "image".into(),
+                    "ls".into(),
+                    "--no-trunc".into(),
+                    "--format".into(),
+                    "{{.ID}}\t{{.Repository}}".into(),
+                ],
+                None,
+                8,
+            )
+            .await?;
+        let mut seen = HashSet::new();
+        let candidates = output
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .filter(|(id, repository)| {
+                crate::local_images::image_engine(repository).as_ref() == Some(engine)
+                    && seen.insert(*id)
+            })
+            .take(24);
+        tokio::time::timeout(Duration::from_secs(20), async {
+            let mut rows = Vec::new();
+            for (id, _) in candidates {
+                if let Ok(image) = self.checked_local_image(id, engine).await {
+                    rows.push(image);
+                }
+            }
+            Ok(rows)
+        })
+        .await
+        .map_err(|_| "检测服务器 Docker 镜像超时，请稍后重试".to_string())?
+    }
     pub async fn gpus(&self) -> Result<Vec<Gpu>, String> {
         let out = execute(
             smi(&[
@@ -226,10 +305,11 @@ impl Runtime {
             "--label".into(),
             format!(
                 "io.phyxi.console.engine={}",
-                if c.engine == Engine::Sglang {
-                    "sglang"
-                } else {
-                    "vllm"
+                match c.engine {
+                    Engine::Vllm => "vllm",
+                    Engine::Sglang => "sglang",
+                    Engine::Lmdeploy => "lmdeploy",
+                    Engine::LlamaCpu => "llama_cpu",
                 }
             ),
             "--restart".into(),
@@ -302,6 +382,36 @@ impl Runtime {
                 c.max_num_seqs.to_string(),
                 "--mem-fraction-static".into(),
                 c.gpu_memory_utilization.to_string(),
+            ]);
+        }
+        if c.engine == Engine::Lmdeploy {
+            let entry = args.iter().position(|a| a == "--entrypoint").unwrap();
+            args.truncate(entry);
+            args.extend([
+                "--entrypoint".into(),
+                "lmdeploy".into(),
+                c.image.clone(),
+                "serve".into(),
+                "api_server".into(),
+                "/model".into(),
+                "--backend".into(),
+                "pytorch".into(),
+                "--server-name".into(),
+                "0.0.0.0".into(),
+                "--server-port".into(),
+                "8000".into(),
+                "--model-name".into(),
+                c.model_name.clone(),
+                "--tp".into(),
+                c.tensor_parallel.to_string(),
+                "--session-len".into(),
+                c.max_model_len.to_string(),
+                "--max-batch-size".into(),
+                c.max_num_seqs.to_string(),
+                "--cache-max-entry-count".into(),
+                c.gpu_memory_utilization.to_string(),
+                "--max-log-len".into(),
+                "0".into(),
             ]);
         }
         if !c.tool_parser.is_empty() {
