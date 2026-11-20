@@ -1,9 +1,5 @@
 //! Child handles, never persisted PIDs: only the creating process may signal them.
-use crate::{
-    config::Config,
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{command::execute, config::Config, runtime::Runtime, store::Store};
 use serde_json::{json, Value};
 use std::{
     fs::{File, OpenOptions},
@@ -75,10 +71,6 @@ pub async fn start_local(
     }
     if !std::path::Path::new(&c.model_path).is_file() {
         return Err("GGUF 文件不存在".into());
-    }
-    // This developer backend cannot take over an existing Docker model.
-    if let Ok(Some(_)) = r.inspect().await {
-        return Err("已有 Docker 模型，请先停止".into());
     }
     store.update(id, "running", "启动 CPU 小模型（2 线程、单并发、无 GPU）")?;
     let log = r.data.join("local-model.log");

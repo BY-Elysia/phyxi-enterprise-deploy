@@ -29,7 +29,11 @@ assert info['Config']['User']=='10001:10001'
 assert info['HostConfig']['ReadonlyRootfs']
 assert not info['HostConfig'].get('DeviceRequests')
 assert not any(m['Destination']=='/var/run/docker.sock' for m in info['Mounts'])
-assert not any(m['Destination']=='/srv/phyxi/data' for m in info['Mounts'])
+settings=dict(line.split('=',1) for line in pathlib.Path('/etc/phyxi/executor.env').read_text().splitlines() if '=' in line)
+state_dir=pathlib.Path(settings['PHYXI_STATE_DIR']).resolve()
+for mount in info['Mounts']:
+    source=pathlib.Path(mount['Source']).resolve()
+    assert not (source.is_relative_to(state_dir) or state_dir.is_relative_to(source)),mount['Destination']
 assert next(c for c in env['checks'] if c['name']=='NVIDIA Toolkit')['ready']
 result=[job('verify_gpu','succeeded'),job('prepare','succeeded')]
 # Create our own short-lived sentinel, prove maintenance refuses it, and clean only this container.

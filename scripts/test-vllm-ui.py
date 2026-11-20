@@ -43,6 +43,7 @@ def main():
                     page.goto(base + '/#runtimes')
                     page.locator('#create').click()
                     page.locator('[name=record_name]').fill('vLLM browser regression')
+                    page.locator('#vllm-options > summary').click()
                     page.locator('[data-vllm-key=dtype]').select_option(json.dumps('bfloat16'))
                     page.locator('.vllm-advanced').nth(0).locator('summary').click()
                     page.locator('[data-vllm-key=enable-prefix-caching]').select_option('false')
@@ -59,6 +60,7 @@ def main():
                     page.locator('#record-form button[type=submit]').click()
                     page.locator('#editor').wait_for(state='hidden')
                     page.get_by_role('button',name='编辑配置',exact=True).click()
+                    page.locator('#vllm-options > summary').click()
                     assert page.locator('[data-vllm-key=dtype]').input_value() == json.dumps('bfloat16')
                     assert page.locator('[data-vllm-key=enable-prefix-caching]').input_value() == 'false'
                     assert page.locator('[data-vllm-key=pipeline-parallel-size]').input_value() == '2'
@@ -89,6 +91,7 @@ def main():
                     page.goto(base + '/#workspaces')
                     page.locator('#create').click()
                     page.locator('[name=record_name]').fill('generation UI test')
+                    page.locator('summary',has_text='生成预设').click()
                     page.locator('[name=generation_temperature]').fill('0')
                     page.locator('[name=generation_top_p]').fill('0.9')
                     page.locator('[name=generation_max_tokens]').fill('128')
@@ -130,6 +133,7 @@ def main():
                         values=exported['generation'] if key=='generation' else exported['providers']['phyxi']['models']['ui-model']['body']
                         assert values['temperature']==0 and values['seed']==0 and values['stop']==stops
                     page.goto(base+'/#workspaces');page.locator('#records button',has_text='编辑').click()
+                    page.locator('summary',has_text='生成预设').click()
                     page.get_by_role('button',name='清空生成预设').click()
                     page.locator('#record-form button[type=submit]').click()
                     page.locator('#editor').wait_for(state='hidden')

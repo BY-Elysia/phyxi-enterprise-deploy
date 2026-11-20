@@ -1,8 +1,8 @@
 //! Bounded real OpenAI-compatible API checks. Health alone never authorizes publication.
 use crate::{
+    command::execute,
     config::Config,
     gateway::{Gateway, GatewayConfig},
-    runtime::execute,
 };
 use serde_json::{json, Value};
 use std::{fs, path::Path, time::Instant};

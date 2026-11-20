@@ -1,5 +1,5 @@
 //! Fixed-revision public HF artifacts; only data files, never remote Python code.
-use crate::{config::Config, runtime::execute, store::Store};
+use crate::{command::execute, config::Config, store::Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};

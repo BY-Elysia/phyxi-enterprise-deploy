@@ -1,8 +1,5 @@
 //! Explicit image source routing. No daemon-wide mirrors or silent fallback.
-use crate::{
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{command::execute, runtime::Runtime, store::Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{

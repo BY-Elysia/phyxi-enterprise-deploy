@@ -1,8 +1,5 @@
 //! Fixed host maintenance operations. No arbitrary package, URL or shell parameters.
-use crate::{
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{command::execute, runtime::Runtime, store::Store};
 use std::{fs, path::Path, sync::Arc};
 use tokio::process::Command;
 async fn run(program: &str, args: &[&str]) -> Result<String, String> {

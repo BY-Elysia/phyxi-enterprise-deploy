@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Isolated executor/console process tests; run on CI or the target server, no real containers."""
-import ast, http.cookiejar, json, os, pathlib, socket, subprocess, tempfile, time, urllib.request, urllib.error, urllib.parse
+import http.cookiejar, json, os, pathlib, socket, subprocess, tempfile, time, urllib.request, urllib.error, urllib.parse
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 BINARY=ROOT/'target/debug/phyxi-console'
 def free_port():
     with socket.socket() as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 with tempfile.TemporaryDirectory(prefix='phyxi-executor-') as tmp:
     d=pathlib.Path(tmp);host=d/'host';web=d/'web';host.mkdir();web.mkdir();bindir=d/'bin';bindir.mkdir()
-    tree=ast.parse((ROOT/'scripts/smoke-console.py').read_text())
-    fake=next(ast.literal_eval(n.value) for n in tree.body if isinstance(n,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='FAKE' for t in n.targets)).replace('time.sleep(.6)','time.sleep(3)')
+    fake=(ROOT/'scripts/fixtures/docker_cli.py').read_text()
     # Simulate an older driver that rejects the extended monitoring query.
     gpu_fixture = '''#!/usr/bin/env python3
 import sys
@@ -21,11 +20,13 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         (bindir/name).write_text(body);(bindir/name).chmod(0o755)
     sock=d/'executor.sock';port=free_port();base=f'http://127.0.0.1:{port}'
     weights=(d/'weights').resolve();model=weights/'test-model';model.mkdir(parents=True)
+    (host/'models').mkdir()
     (model/'config.json').write_text('{}')
     (model/'model.safetensors').write_bytes(b'fixture')
     outside=(d/'outside').resolve();outside.mkdir()
     (weights/'escape').symlink_to(outside,target_is_directory=True)
-    env={**os.environ,'PATH':str(bindir)+':'+os.environ['PATH'],'PHYXI_STATE_DIR':str(host),'PHYXI_EXECUTOR_SOCKET':str(sock),'PHYXI_FAKE_STATE':str(d/'fake'),'PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock','PHYXI_MODEL_ROOTS':str(weights)}
+    (d/'test-docker.sock').touch()
+    env={**os.environ,'PHYXI_TEST_PULL_DELAY':'3','PATH':str(bindir)+':'+os.environ['PATH'],'PHYXI_STATE_DIR':str(host),'PHYXI_EXECUTOR_SOCKET':str(sock),'PHYXI_FAKE_STATE':str(d/'fake'),'PHYXI_DOCKER_HOST':'unix://'+str(d/'test-docker.sock'),'PHYXI_MODEL_ROOTS':str(weights)}
     wenv={**env,'PHYXI_ROLE':'console','PHYXI_STATE_DIR':str(web),'PHYXI_LOCAL_HTTP_LOGIN':'1','PHYXI_REQUIRE_ADMIN':'1','PHYXI_PORT':str(port),'PHYXI_EXECUTOR_TOKEN_FILE':str(d/'executor.token')}
     subprocess.run([str(BINARY),'--set-admin'],env=wenv,input='executor-test-password',text=True,check=True,stdout=subprocess.DEVNULL)
     log=(d/'process.log').open('w');agent=None;console=None
@@ -76,6 +77,18 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         assert device.get('utilization_percent') is None
         assert call('/api/actions/verify_gpu','POST',authenticated=False)[0]==401
         status,c=call('/api/config');assert status==200,(status,c)
+        status,folders=call('/api/models/local-paths')
+        assert status==200
+        assert [root for root in folders['roots'] if root['kind']=='configured']==[
+            {'path':str(weights),'available':True,'kind':'configured'}
+        ]
+        filesystem='/api/models/local-paths?root=%2F'
+        status,folder=call(filesystem)
+        assert status==200 and folder['path']=='/' and folder['parent'] is None
+        assert not folder['selectable'] and not {'etc','proc','sys'}.intersection(entry['name'] for entry in folder['entries'])
+        assert call(filesystem+'&path=%2Fetc')[0]==400
+        status,folder=call(filesystem+'&'+urllib.parse.urlencode({'path':str(host.resolve())}))
+        assert status==200 and [entry['name'] for entry in folder['entries']]==['models']
         browse='/api/models/local-paths?'+urllib.parse.urlencode({'root':str(weights)})
         status,folder=call(browse)
         assert status==200 and folder['path']==str(weights)
@@ -114,7 +127,8 @@ if '--query-gpu=uuid,name,memory.total,memory.used' in sys.argv:
         assert status==200 and saved['record']['data']['model_path']==str(external)
         assert call('/api/models/external/status')[1]['ready'] is True
         assert 'registered_model_paths' not in call('/api/catalog')[1]
-        c.update(image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'],tensor_parallel=1)
+        assert c['model_path']=='' and c['gpu_uuids']==[]
+        c.update(model_path=str(model),image='vllm/vllm-openai@sha256:'+'a'*64,gpu_uuids=['GPU-00000000-0000-0000-0000-000000000001'],tensor_parallel=1)
         assert call('/api/config','PUT',c)[0]==200
         assert call('/api/actions/arbitrary-shell','POST')[0]==404
         (d/'fake.slow').touch()

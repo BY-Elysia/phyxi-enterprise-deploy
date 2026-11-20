@@ -29,7 +29,7 @@
 
 - `GET /api/presets`：只返回推理引擎镜像、模型仓库及下载站点预设，不下载资源。
 - `GET /api/models/{id}/status`：检查本地权重与下载清单是否完整。
-- `GET /api/models/local-paths`：列出权重根目录。传入 `root` 和 `path` 可浏览一层目录及 GGUF 文件。
+- `GET /api/models/local-paths`：列出权重根目录。传入 `root=/` 从执行器可见的文件系统根目录浏览。指定 `path` 可查看该位置的一层目录及 GGUF 文件。
 - `GET /api/catalog`：读取独立配置库。
 - `PUT /api/catalog/{kind}/{id}`：`{"name":"名称","revision":0,"data":{...}}`；创建修订为 0，更新传读取到的修订号。
 - 从服务器添加已有权重时，PUT 加 `local=true`，提交服务器绝对路径，路径可由浏览接口返回。检测目录配置、权重分片或 GGUF 文件头通过后保存。

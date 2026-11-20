@@ -26,10 +26,10 @@ let managedServices=false,filterText='',jobsSignature='',environmentBusy=false,d
 let token=sessionStorage.getItem('phyxi-token')||'',catalog={},view='deployments',selection={},connected=false,busy=false,jobs=[],activeJob='',runtime={};
 
 const fields={
- models:[['model_name','默认服务模型名','text','phyxi-model'],['source_repo','模型仓库 / 仓库地址','optional',''],['source_endpoint','下载站点','endpoint',''],['source_revision','版本（默认 main，保存时解析固定版本）','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
+ models:[['model_name','默认服务模型名','text','phyxi-model'],['source_repo','模型仓库','optional',''],['source_endpoint','下载站点','endpoint',''],['source_revision','仓库版本','optional','main'],['source_file','GGUF 文件（可选）','optional','']],
  images:[['engine','推理引擎','gpu-engine','vllm'],['reference','Docker 镜像地址（标签或摘要）','text','']],
  runtimes:[['engine','推理引擎','engine','vllm'],['max_model_len','上下文长度','number',8192],['max_num_seqs','最大并发序列','number',8],['gpu_memory_utilization','显存使用比例','decimal',0.85],['tool_parser','工具解析器（可选）','optional',''],['reasoning_parser','思考解析器（可选）','optional',''],['verify_tools','验收工具调用','checkbox',false],['verify_images','验收图片理解','checkbox',false]],
- deployments:[['mode','接入方式','inference-mode','container'],['native_binary','本机 vLLM 程序','binary',''],['model_name','API 服务模型名（留空使用权重配置的默认值）','optional',''],['model','模型权重','ref:models',''],['image','推理引擎镜像（CPU 可留空）','ref:images',''],['runtime','推理参数方案','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','原生模式 API 端口（容器内固定 8000）','number',18000]],
+ deployments:[['mode','接入方式','inference-mode','container'],['native_binary','本机 vLLM 程序','binary',''],['model_name','服务模型名','optional',''],['model','模型权重','ref:models',''],['image','推理引擎镜像（CPU 可留空）','ref:images',''],['runtime','推理参数方案','ref:runtimes',''],['gpu_uuids','GPU UUID（逗号分隔，CPU 留空）','optional',''],['port','API 端口','number',18000]],
  gateways:[['deployment','关联的模型部署','ref:deployments',''],['domain','访问域名 / IP','text',''],['bind_ip','监听 IPv4','text','127.0.0.1'],['port','HTTPS 端口','number',18443],['allowed_cidrs','允许来源网段（逗号分隔）','text','127.0.0.1/32'],['tls_mode','证书模式','tls','enterprise']],
  workspaces:[['gateway','网关','ref:gateways',''],['credential_env','客户端凭据环境变量名','text','PHYXI_API_KEY']]
 };

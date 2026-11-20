@@ -1,8 +1,5 @@
 //! Bounded resource samples, independent from deployment progress. No model memory in control plane.
-use crate::{
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{command::execute, runtime::Runtime, store::Store};
 use serde_json::json;
 use std::{
     sync::Arc,

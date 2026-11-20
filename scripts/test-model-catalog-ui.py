@@ -14,7 +14,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -155,21 +155,36 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
             assert page.locator('[name=model_path]').count()==0
             page.get_by_role('button',name='添加已有权重',exact=True).last.click()
             assert page.locator('[name=source_repo]').count()==0
-            path_input = page.locator('[name=model_path]')
-            root_picker = page.locator('[name=model_root]')
             add = page.get_by_role('button', name='检测并添加', exact=True)
-            assert path_input.is_visible() and path_input.input_value() == ''
-            assert root_picker.is_hidden()
-            path_input.fill('Qwen/Qwen3-1.7B')
-            add.click()
-            page.get_by_text('请输入服务器上以 / 开头的绝对路径', exact=True).wait_for()
-            path_input.fill(str(model))
+            current = page.locator('.model-path-current')
+
+            def browse_to(path):
+                location = Path('/')
+                expect(current).to_have_attribute('title', str(location))
+                for part in path.parts[1:]:
+                    page.locator('.model-path-entries').get_by_role('button', name=part, exact=True).click()
+                    location /= part
+                    expect(current).to_have_attribute('title', str(location))
+
+            expect(current).to_have_attribute('title', '/')
+            assert page.locator('.model-path-picker input, .model-path-picker select').count() == 0
+            assert page.get_by_role('button', name='选择当前目录', exact=True).count() == 0
+            expect(add).to_be_disabled()
+            browse_to(model)
+            expect(add).to_be_enabled()
+            current.get_by_role('button', name=model.parent.name, exact=True).click()
+            expect(current).to_have_attribute('title', str(model.parent))
+            page.locator('.model-path-entries').get_by_role('button', name='Qwen3-1.7B', exact=True).click()
+            expect(add).to_be_enabled()
+            page.locator('.model-path-selection strong').get_by_text(model.name, exact=True).wait_for()
+            if args.screenshots:
+                page.locator('#editor').screenshot(path=str(args.screenshots / 'existing-weights-mobile.png'))
+                page.set_viewport_size({'width':1280,'height':820})
+                page.locator('#editor').screenshot(path=str(args.screenshots / 'existing-weights.png'))
+                page.set_viewport_size({'width':390,'height':844})
             add.click()
             page.wait_for_function("() => document.querySelector('#editor-error').textContent.includes('缺少权重分片')")
             (model / 'model-00002-of-00002.safetensors').write_bytes(b'fixture shard')
-            page.get_by_role('button', name='输入相对路径', exact=True).click()
-            root_picker.select_option(str(weights))
-            path_input.fill(str(model.relative_to(weights)))
             add.click()
             page.wait_for_selector('#editor', state='hidden')
             endpoint = f'http://127.0.0.1:{port}/api/catalog'
@@ -181,23 +196,9 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
 
             page.locator('#deployment-back').click()
             page.locator('#model-local').click()
-            page.get_by_role('button', name='浏览服务器文件', exact=True).click()
-            page.locator('[name=model_root] option', has_text=str(weights)).wait_for(state='attached')
-            assert root_picker.input_value() == ''
-            assert path_input.is_hidden()
-            add.click()
-            page.get_by_text('请在服务器上选择模型目录或 GGUF 文件', exact=True).wait_for()
-            root_picker.select_option(str(weights))
-            page.get_by_role('button', name='打开目录 Qwen', exact=True).click()
-            page.get_by_role('button', name='打开目录 Qwen3-1.7B', exact=True).click()
-            page.get_by_role('button', name='返回上一级', exact=True).click()
-            page.get_by_role('button', name='打开目录 Qwen3-1.7B', exact=True).click()
-            page.get_by_role('button', name='选择当前目录', exact=True).click()
-            page.get_by_text('已选 ' + str(model), exact=True).wait_for()
-            root_picker.select_option(str(second_root))
-            page.get_by_role('button', name='选择文件 test.gguf', exact=True).click()
-            page.get_by_text('已选 ' + str(gguf), exact=True).wait_for()
-            assert path_input.is_hidden()
+            browse_to(second_root)
+            page.get_by_role('button', name='test.gguf', exact=True).click()
+            page.locator('.model-path-selection strong').get_by_text(gguf.name, exact=True).wait_for()
             add.click()
             page.wait_for_selector('#editor', state='hidden')
             records = page.request.get(endpoint, headers=headers).json()['records']['models']
@@ -205,23 +206,14 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
 
             page.locator('#deployment-back').click()
             page.locator('#model-local').click()
-            page.get_by_role('button', name='浏览服务器文件', exact=True).click()
-            page.get_by_label('打开其他服务器目录').fill(str(external))
-            page.get_by_role('button', name='打开目录', exact=True).click()
-            page.get_by_role('button', name='选择文件 shared.gguf', exact=True).click()
+            browse_to(external)
+            page.get_by_role('button', name='shared.gguf', exact=True).click()
             assert page.get_by_text('unrelated.txt', exact=True).count() == 0
             add.click()
             page.wait_for_selector('#editor', state='hidden')
             records = page.request.get(endpoint, headers=headers).json()['records']['models']
             assert any(r['data']['model_path'] == str(other) for r in records.values())
             assert other.read_bytes() == b'GGUFfixture'
-            page.locator('#deployment-back').click()
-            page.locator('#model-local').click()
-            page.get_by_role('button', name='浏览服务器文件', exact=True).click()
-            recent = root_picker.locator('optgroup[label="最近打开的目录"] option', has_text=str(external))
-            recent.wait_for(state='attached')
-            assert root_picker.input_value() == ''
-            page.locator('#discard-editor').click()
             class Existing(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     assert self.path == '/v1/models'
@@ -250,7 +242,7 @@ with tempfile.TemporaryDirectory(prefix='physpace-model-catalog-') as td:
                 finally:server.shutdown()
             assert not errors, errors
             browser.close()
-        print('PASS: catalog/filter/pagination/logos, preset and custom forms, save without download, pinned revision, explicit fixture download, saved library, mobile layout, absolute path validation, explicit server roots and GGUF selection')
+        print('PASS: catalog/filter/pagination/logos, preset and custom forms, save without download, pinned revision, explicit fixture download, saved library, mobile layout, filesystem-root browsing, model validation and GGUF selection')
     finally:
         proc.terminate()
         proc.wait(timeout=10)

@@ -306,7 +306,7 @@ pub async fn call(
             .arg(format!("@{}", temp.join("body").display()));
         }
         cmd.arg(format!("{url}/admin/workspaces/{id}"));
-        let text = crate::runtime::execute(cmd, None, 12).await?;
+        let text = crate::command::execute(cmd, None, 12).await?;
         let (body, status) = text.rsplit_once('\n').ok_or("鉴权响应无效")?;
         Ok((
             status.parse().map_err(|_| "鉴权状态码无效")?,

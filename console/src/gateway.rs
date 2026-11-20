@@ -1,5 +1,5 @@
 //! Enterprise ingress owns TLS/auth only; it never starts an inference engine.
-use crate::{config::Config, runtime::execute};
+use crate::{command::execute, config::Config};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,

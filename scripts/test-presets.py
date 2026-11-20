@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """No network or GPU: preset metadata, explicit preparation, immutable local image and SGLang/LMDeploy contracts."""
-import shutil,importlib.util,json,os,pathlib,platform,socket,subprocess,tempfile,time,urllib.request,urllib.error
+import shutil,importlib.util,json,os,pathlib,socket,subprocess,tempfile,time,urllib.request,urllib.error
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 def fixture(name):
  spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/name);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 def main():
- smoke=fixture('smoke-console.py');contract=fixture('test-api-contract.py')
+ contract=fixture('test-api-contract.py')
  with tempfile.TemporaryDirectory(prefix='phyxi-presets-') as td:
   d=pathlib.Path(td);bins=d/'bin';bins.mkdir();model=d/'model';model.mkdir();(model/'config.json').write_text('{}');(model/'model.safetensors').write_bytes(b'fixture')
-  host_arch = 'arm64' if platform.machine().lower() in ('arm64','aarch64') else 'amd64'
-  docker_fixture = smoke.FAKE.replace("'architecture':'amd64'", "'architecture':" + repr(host_arch))
-  for name,body in [('docker',docker_fixture),('nvidia-smi',smoke.FAKE),('curl',contract.CURL)]:
+  docker_fixture=(ROOT/'scripts/fixtures/docker_cli.py').read_text()
+  for name,body in [('docker',docker_fixture),('nvidia-smi',docker_fixture),('curl',contract.CURL)]:
    path=bins/name;path.write_text(body);path.chmod(0o755)
   native=bins/'vllm'
   native.write_text("""#!/usr/bin/env python3
-import http.server,json,sys
+import getpass,http.server,json,os,pathlib,sys
 args=sys.argv[1:]
 port=int(args[args.index('--port')+1])
 name=args[args.index('--served-model-name')+1]
+if name=="fixture":
+ assert os.environ["CUDA_VISIBLE_DEVICES"]=="0" and os.environ["CUDA_DEVICE_ORDER"]=="PCI_BUS_ID"
+ assert getpass.getuser()=="phyxi-vllm"
+ home=pathlib.Path.home()
+ assert home==(pathlib.Path(os.environ["PHYXI_STATE_DIR"])/"vllm-home").resolve()
+ (home/"cache-test").touch()
 class Handler(http.server.BaseHTTPRequestHandler):
  def do_GET(self):
   assert self.path=='/v1/models'
@@ -25,8 +30,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer(('127.0.0.1',port), Handler).serve_forever()
 """);native.chmod(0o755)
   with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
-  env=os.environ.copy();env.update(PHYXI_REAL_CURL=shutil.which('curl'),PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix:///var/run/docker.sock',PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
-  env.pop("PHYXI_HF_ENDPOINT",None)
+  (d/'test-docker.sock').touch()
+  env=os.environ.copy();env.update(PHYXI_TEST_PULL_DELAY="4",PHYXI_REAL_CURL=shutil.which('curl'),PHYXI_STATE_DIR=str(d/'state'),PHYXI_PORT=str(port),PHYXI_DOCKER_HOST='unix://'+str(d/'test-docker.sock'),PHYXI_DOCKER_CALLS=str(d/'calls'),PHYXI_BAD_DOWNLOAD=str(d/'bad-download'),PHYXI_FAKE_STATE=str(d/'container'),PATH=str(bins)+os.pathsep+env['PATH'])
+  for key in ("PHYXI_HF_ENDPOINT","USER","LOGNAME","USERNAME","LNAME"):
+   env.pop(key,None)
+  env["HOME"]=str(d/"missing-home")
   proc=subprocess.Popen([str(ROOT/'target/debug/phyxi-console')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);token=''
   def call(path,method='GET',data=None,status=200):
    req=urllib.request.Request(f'http://127.0.0.1:{port}/api'+path,data=json.dumps(data).encode() if data is not None else None,method=method,headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
@@ -100,8 +108,7 @@ http.server.HTTPServer(('127.0.0.1',port), Handler).serve_forever()
    # Separate downloads overlap; duplicate resources and unsafe lifecycle mutations do not.
    for key in ['a','b','c','d']:
     put('images','parallel-'+key,{'engine':'vllm','reference':'registry.example/'+key+':test'})
-   slow=smoke.FAKE.replace("if p.with_suffix('.slow').exists():time.sleep(.6)","if p.with_suffix('.slow').exists():time.sleep(4)")
-   (bins/'docker').write_text(slow);(d/'container.slow').touch()
+   (d/'container.slow').touch()
    ids=[call('/actions/pull_image?kind=images&id=parallel-'+key,'POST',status=202)['id'] for key in ['a','b','c']]
    put('models','new-model-during-download',saved['data'])
    put('images','new-during-download',{'engine':'vllm','reference':'registry.example/new:test'})
@@ -142,6 +149,9 @@ http.server.HTTPServer(('127.0.0.1',port), Handler).serve_forever()
     runtime['engine']='vllm';put('runtimes','native',runtime)
     native_dep={**dep,'mode':'native','native_binary':str(native),'image':'','port':native_port,'runtime':'native'}
     put('deployments','native',native_dep)
+    (d/'test-docker.sock').unlink()
+    (bins/'docker').write_text('#!/bin/sh\nexit 99\n');(bins/'curl').write_text('#!/bin/sh\nexit 99\n')
+    assert call('/status')['state']=='absent'
     task('start','deployments','native')
     assert call(f'/native-inference/{native_port}/models')['models']==['fixture']
     task('stop','deployments','native')

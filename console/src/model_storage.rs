@@ -19,7 +19,6 @@ pub fn storage_roots(data: &Path) -> Vec<PathBuf> {
     } else {
         Vec::new()
     };
-    roots.extend(["/mnt", "/media", "/srv"].map(PathBuf::from));
     roots.retain(|path| {
         fs::canonicalize(path).is_ok_and(|resolved| {
             resolved == *path && model_location(data, &resolved) && resolved.is_dir()

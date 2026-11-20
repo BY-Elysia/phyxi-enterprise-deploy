@@ -2,7 +2,6 @@ import { addVllmEditor, readVllm } from './runtime-options.js';
 import { addGenerationEditor, readGeneration } from './generation.js';
 import { mountModelPathPicker } from '../../model-path-picker.js';
 
-const hints={models:'保存时只查询版本信息，不下载权重。保存后点击下载权重；自定义支持 owner/model、Hugging Face 或 hf-mirror 仓库地址。GPU 引擎使用完整权重，CPU 测试使用 GGUF。',images:'选择预设只填写地址，不下载。保存后点击下载推理引擎镜像，或自行 docker pull；启动只使用已准备的本地镜像，并固定镜像 ID。',runtimes:'GPU 推理引擎镜像与参数需使用同一引擎。显存比例在 vLLM 对应 gpu-memory-utilization，在 SGLang 对应 mem-fraction-static；LMDeploy 使用 PyTorch 后端，显存比例指 KV 缓存占空闲显存的比例（不含权重），不是总显存上限。CPU 测试限制为上下文 128–2048、单并发。',deployments:'可以先保存未完成的组合。启动前必须补齐引用；全服务器只允许一个运行实例。vLLM 的 TP 自动等于所选 GPU 数量 ÷ PP（默认 1），必须整除。',gateways:'可先独立保存网关配置，启动时再选择已运行的部署。保存后在“证书管理”选择 Let’s Encrypt、私有 CA 或导入已有证书；自签仅用于回环测试。',workspaces:'工作区定义客户端接入身份。先应用接入配置，再生成独立 API Key；每个工作区只有一个有效密钥，停用会撤销密钥，已有请求允许完成。'};
 
 export function createRecordEditor({
  api,button,confirmAction,notice,parameterSection,bytes,titles,fields,
@@ -17,7 +16,7 @@ export function createRecordEditor({
   if(type.startsWith('ref:')||['engine','gpu-engine','endpoint','tls','inference-mode','binary'].includes(type)){
    input=document.createElement('select');
    const {catalog,presets}=getResources();
-   const options=type.startsWith('ref:')?[['','稍后选择'],...Object.entries(catalog[type.slice(4)]||{}).map(([id,r])=>[id,r.name])]:
+   const options=type.startsWith('ref:')?[['','无'],...Object.entries(catalog[type.slice(4)]||{}).map(([id,r])=>[id,r.name])]:
     type==='inference-mode'?[['container','容器镜像'],['native','本机 vLLM 环境'],['external','连接本机已有服务']]:
     type==='binary'?[]:
     type==='endpoint'?presets.endpoints.map(p=>[p.url,p.name]):
@@ -62,9 +61,12 @@ export function createRecordEditor({
 
  function mountLocalModel(data){
   const box=$('local-asset-fields');
-  editing.modelPath=mountModelPathPicker(box,api,data.model_path||'');
+  editing.modelPath=mountModelPathPicker(box,api,data.model_path||'',selected=>{
+   if($('record-form').dataset.saving)return;
+   $('editor-error').textContent='';
+   $('record-form').querySelector('button[type=submit]').disabled=!selected;
+  });
   box.append(editorField(['model_name','默认服务模型名（可选）','optional',''],data));
-  $('editor-hint').textContent='服务器会检查所选文件。检测通过后添加权重，权重文件保留原位。';
  }
 
  function mountLocalImages(data){
@@ -78,7 +80,7 @@ export function createRecordEditor({
   function present(){
    const selected=candidates.find(item=>item.id===image.value);
    submit.disabled=!selected;
-   if(!selected){details.textContent='选择一个镜像以查看详情。';return;}
+   if(!selected){details.textContent='';return;}
    details.replaceChildren(parameterSection('镜像信息',[
     ['仓库与标签',selected.reference],['平台','Linux '+selected.architecture],
     ['镜像大小',selected.size_bytes?bytes(selected.size_bytes):'暂无数据'],['本地镜像 ID',selected.id],
@@ -110,7 +112,6 @@ export function createRecordEditor({
   }
   engine.onchange=discover;image.onchange=present;
   box.append(label,editorButton('重新检测',discover),imageLabel,details);
-  $('editor-hint').textContent='这里检测部署服务器已导入 Docker 的镜像。直接通过 Python 启动的 vLLM 进程不属于镜像。确认后保存镜像 ID。';
   discover();
  }
 
@@ -123,6 +124,7 @@ export function createRecordEditor({
   const local=asset&&(mode?mode==='local':Boolean(existingLocal));
   editing={kind,id:id||crypto.randomUUID(),revision:r?.revision||0,page:r?detailPage:'overview',local};
   delete form.dataset.saving;
+  $('editor-fields').before(recordName.parentElement);
   form.reset();recordName.parentElement.hidden=false;recordName.required=!local;
   recordName.value=r?.name||'';recordName.placeholder=local?'留空时自动命名':'';
   $('record-name-label').textContent=local?'配置名称（可选）':'配置名称';
@@ -130,15 +132,17 @@ export function createRecordEditor({
   save.disabled=false;
   save.textContent=local?(kind==='models'?(r?'检测并保存':'检测并添加'):'确认使用此镜像'):'保存配置';
   const newTitle=local?(kind==='models'?'添加已有权重':'添加本机镜像'):'新建'+titles[kind];
-  $('editor-title').textContent=r?'编辑'+titles[kind]:newTitle;
+  $('editor-title').textContent=r?'编辑'+titles[kind]:local&&kind==='models'?'模型权重':newTitle;
   $('editor-error').textContent='';
   $('editor-fields').replaceChildren();$('local-asset-fields').replaceChildren();$('asset-source-mode').replaceChildren();
-  $('editor-hint').textContent=hints[kind];
   $('delete-record').hidden=!r||kind==='workspaces';
   if(asset&&!r)mountAssetModes(local);
   let data={...r?.data};
   if(local){
    if(kind==='models')mountLocalModel(data);else mountLocalImages(data);
+   const options=optionalSettings($('local-asset-fields'));
+   if(kind==='models')options.append(form.elements.model_name.parentElement);
+   options.append(recordName.parentElement);
   }else{
    if(kind==='models')Object.assign(data,{
     source_repo:data.source?.repo||'',source_endpoint:data.source?.endpoint||'',
@@ -157,13 +161,14 @@ export function createRecordEditor({
     });
    }
    if(kind==='workspaces'){
-    addGenerationEditor(data,{target:$('editor-fields'),button});
+    const standalone=r&&detailPage==='generation';
+    const target=standalone?$('editor-fields'):optionalSettings($('editor-fields'),'生成预设');
+    addGenerationEditor(data,{target,button});
     if(r&&['access','generation'].includes(detailPage)){
      const generation=detailPage==='generation';
      $('editor-title').textContent=generation?'修改生成预设':'修改接入配置';
      recordName.parentElement.hidden=generation;
-     for(const child of $('editor-fields').children)child.hidden=generation?child.id!=='generation-editor':child.id==='generation-editor';
-     if(generation)$('editor-hint').textContent='保存后重新导出客户端配置，或在客户端设置相同参数；无需重启模型。';
+     for(const child of $('editor-fields').children)child.hidden=generation?child.id!=='generation-editor':child.contains(form.elements.generation_temperature);
     }
    }
   }
@@ -189,9 +194,7 @@ export function createRecordEditor({
    if(target.local){
     query.set('local','true');
     if(kind==='models'){
-     const modelPath=target.modelPath.read();
-     if(modelPath.root)query.set('root',modelPath.root);
-     data={model_path:modelPath.path,model_name:fieldsOfForm.model_name.value.trim(),source:null};
+     data={model_path:target.modelPath.read(),model_name:fieldsOfForm.model_name.value.trim(),source:null};
     }else{
      if(!fieldsOfForm.local_image.value)throw Error('请先选择检测到的镜像');
      data={engine:fieldsOfForm.engine.value,reference:fieldsOfForm.local_image.value};
@@ -254,12 +257,11 @@ export function createRecordEditor({
  function chooseModelPreset(preset){
   edit();const picker=$('model-preset-select');picker.value=preset.id;picker.dispatchEvent(new Event('change'));
   $('editor-title').textContent='添加 '+preset.name;
-  $('editor-hint').textContent=hints.models+' '+preset.backend_note;
   const info=document.createElement('p');info.id='model-selection-note';info.className='model-selection-note';info.textContent=modelPresetSummary(preset);
   $('editor-fields').prepend(info);
  }
 
- function modelPresetSummary(preset){return `${preset.parameters_b}B${preset.active_parameters_b?' · 激活 '+preset.active_parameters_b+'B':''} · ${preset.precision} · 权重约 ${bytes(preset.weight_bytes)}。保存后可下载，不会启动模型。`;}
+ function modelPresetSummary(preset){return `${preset.parameters_b}B${preset.active_parameters_b?' · 激活 '+preset.active_parameters_b+'B':''} · ${preset.precision} · 权重约 ${bytes(preset.weight_bytes)}`;}
 
  function customImage(){
   edit();
@@ -286,7 +288,7 @@ export function createRecordEditor({
   const versionLabel=document.createElement('label');versionLabel.textContent='镜像版本';const versions=document.createElement('select');versions.id='image-version-select';versionLabel.append(versions);
   const info=document.createElement('p');info.className='hint';
   const apply=()=>{const p=presets.images.find(p=>p.id===picker.value),v=p?.versions.find(v=>v.version===versions.value);if(!v)return;f.reference.value=v.reference;f.engine.value=p.engine;if(!isExisting)f.record_name.value=p.name+' '+v.version;info.textContent='官方版本 '+v.version+' · Linux '+v.platforms.join(' / ')+'。'+p.note;};
-  picker.onchange=()=>{const p=presets.images.find(p=>p.id===picker.value);versions.replaceChildren();versionLabel.hidden=!p;f.reference.readOnly=Boolean(p);f.reference.parentElement.hidden=false;f.engine.disabled=Boolean(p);if(!p){info.textContent='填写自定义版本标签或摘要，并选择与镜像匹配的推理后端。';return;}for(const v of p.versions)versions.append(new Option(v.version,v.version));versions.value=p.default_version;apply();};
+  picker.onchange=()=>{const p=presets.images.find(p=>p.id===picker.value);versions.replaceChildren();versionLabel.hidden=!p;f.reference.readOnly=Boolean(p);f.reference.parentElement.hidden=false;f.engine.disabled=Boolean(p);if(!p){info.textContent='';return;}for(const v of p.versions)versions.append(new Option(v.version,v.version));versions.value=p.default_version;apply();};
   versions.onchange=apply;box.append(label,versionLabel,info);$('editor-fields').prepend(box);
   const match=presets.images.find(p=>p.versions.some(v=>v.reference===f.reference.value||v.tag_reference===f.reference.value));
   if(match){const original=f.reference.value;picker.value=match.id;picker.onchange();versions.value=match.versions.find(v=>v.reference===original||v.tag_reference===original).version;apply();if(isExisting)f.reference.value=original;}
@@ -325,7 +327,7 @@ export function createRecordEditor({
      if(!mode.isConnected||mode.value!=='native')return;
      binary.replaceChildren(...binaries.map(path=>new Option(path,path)));
      if(binaries.includes(data.native_binary))binary.value=data.native_binary;
-     feedback.textContent=binaries.length?'请选择运行环境并确认 GPU 分配。':'执行器未发现 vLLM，可在安装时用 --vllm-bin 指定环境中的 bin/vllm。';
+     feedback.textContent=binaries.length?'':'执行器未发现 vLLM，可在安装时用 --vllm-bin 指定环境中的 bin/vllm。';
     }catch(error){feedback.textContent=error.message;}
    }
   }
@@ -358,13 +360,33 @@ export function createRecordEditor({
    if(preset){
     f.record_name.value=preset.name;f.model_name.value=preset.model_name;
    }
-   hint.textContent=preset?.note||'请在下方填写自定义来源地址。';
+   hint.textContent=preset?.note||'';
   };
   label.append(select,hint);$('editor-fields').prepend(label);
   if(!isExisting&&presets.models.length){select.value=presets.models[0].id;select.onchange();}
  }
 
 
- function groupEditor(kind){const groups={models:[['模型标识',['model_name']],['下载来源',['source_repo','source_endpoint','source_revision','source_file']]],images:[['推理引擎与版本',['engine','reference']]],runtimes:[['推理引擎',['engine']],['资源与性能',['max_model_len','max_num_seqs','gpu_memory_utilization']],['解析器',['tool_parser','reasoning_parser']],['验收选项',['verify_tools','verify_images']]],deployments:[['运行方式',['mode','native_binary']],['服务标识',['model_name']],['选择独立配置',['model','image','runtime']],['资源分配',['gpu_uuids','port']]],gateways:[['关联服务',['deployment']],['HTTPS 入口',['domain','bind_ip','port']],['访问限制',['allowed_cidrs']],['TLS 证书',['tls_mode']]],workspaces:[['客户端连接',['gateway','credential_env']]]};const target=$('editor-fields');for(const [title,keys]of groups[kind]||[]){const heading=document.createElement('h3');heading.className='form-section-title';heading.textContent=title;target.append(heading);for(const key of keys){const input=$('record-form').elements[key];if(input)target.append(input.parentElement);}}}
+ function optionalSettings(target,title='可选设置'){
+  const details=document.createElement('details');
+  details.className='editor-options wide';
+  const summary=document.createElement('summary');
+  summary.textContent=title;
+  details.append(summary);
+  target.append(details);
+  return details;
+ }
+
+ function groupEditor(kind){
+  const advanced={
+   models:['source_revision','source_file'],
+   runtimes:['tool_parser','reasoning_parser','verify_tools','verify_images'],
+   gateways:['port','allowed_cidrs'],
+   workspaces:['credential_env'],
+  }[kind];
+  if(!advanced)return;
+  const details=optionalSettings($('editor-fields'));
+  for(const key of advanced)details.append($('record-form').elements[key].parentElement);
+ }
  return {open:edit,customModel,chooseModelPreset,customImage,chooseImagePreset};
 }

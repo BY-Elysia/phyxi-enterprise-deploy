@@ -1,8 +1,9 @@
 //! One orchestrator, distinct model, host, gateway and acceptance responsibilities.
 use crate::{
+    command::execute,
     config::Config,
     gateway::{Gateway, GatewayConfig},
-    runtime::{execute, Runtime},
+    runtime::Runtime,
     store::Store,
     verification,
 };

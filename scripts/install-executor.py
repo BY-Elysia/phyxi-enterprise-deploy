@@ -28,7 +28,7 @@ if a.download_dir is not None:
     download_dir=str(a.download_dir.resolve())
     if any(c in download_dir for c in '\n\r $"\\,:;%'):p.error('Unsupported download directory characters')
 if a.model_root is None:
-    model_roots=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_MODEL_ROOTS=')),'') if executor_env.is_file() else ''
+    model_roots=prior_settings.get('PHYXI_MODEL_ROOTS','')
 else:
     roots=[]
     for path in a.model_root:
@@ -85,7 +85,7 @@ if (install/'phyxi-console').exists():shutil.copy2(install/'phyxi-console',insta
 (install/'phyxi-console.new').replace(install/'phyxi-console')
 config.mkdir(mode=0o700,exist_ok=True)
 settings={'PHYXI_ROLE':'executor','PHYXI_STATE_DIR':str(data),'PHYXI_EXECUTOR_SOCKET':'/run/phyxi/executor.sock','PHYXI_DOCKER_HOST':'unix:///var/run/docker.sock','PHYXI_MANAGED_SERVICES':'1','PHYXI_CONTROL_IMAGE':a.image,'PHYXI_GATEWAY_CONTAINER':'phyxi-managed-gateway','PHYXI_ACCESS_URL':'http://127.0.0.1:8766','PHYXI_ACCESS_ADMIN_FILE':str(data/'service-secrets/access.token'),'PHYXI_ENABLE_HOST_SETUP':'1'}
-vllm_bins=next((line.partition('=')[2] for line in executor_env.read_text().splitlines() if line.startswith('PHYXI_VLLM_BIN=')),'') if executor_env.exists() else ''
+vllm_bins=prior_settings.get('PHYXI_VLLM_BIN','')
 if a.vllm_bin:
     vllm_bins=':'.join(str(path) for path in a.vllm_bin)
 settings['PHYXI_WEIGHT_READER_GID']=str(model_gid)

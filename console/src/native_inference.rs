@@ -1,10 +1,5 @@
 //! Host-installed vLLM and read-only discovery of a local OpenAI-compatible service.
-use crate::{
-    config::Config,
-    process::Managed,
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{config::Config, process::Managed, runtime::Runtime, store::Store};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -65,22 +60,29 @@ pub async fn models(port: u16) -> Result<Vec<String>, String> {
     if port < 1024 {
         return Err("请输入本机模型服务的非特权端口".into());
     }
-    let mut cmd = Command::new("curl");
-    cmd.args([
-        "--disable",
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--noproxy",
-        "*",
-        "--max-time",
-        "4",
-        "--max-filesize",
-        "65536",
-        &format!("http://127.0.0.1:{port}/v1/models"),
-    ]);
-    let response = execute(cmd, None, 6).await?;
-    let value: Value = serde_json::from_str(&response).map_err(|_| "服务没有返回模型清单")?;
+    let fetch = async {
+        let stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+        let (mut sender, connection) =
+            hyper::client::conn::http1::handshake(hyper_util::rt::TokioIo::new(stream)).await?;
+        tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let request = hyper::Request::get("/v1/models")
+            .header("host", format!("127.0.0.1:{port}"))
+            .body(axum::body::Body::empty())?;
+        let response = sender.send_request(request).await?;
+        if !response.status().is_success() {
+            return Err(format!("模型服务返回 HTTP {}", response.status()).into());
+        }
+        let bytes =
+            axum::body::to_bytes(axum::body::Body::new(response.into_body()), 65536).await?;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(bytes)
+    };
+    let response = tokio::time::timeout(Duration::from_secs(4), fetch)
+        .await
+        .map_err(|_| "本机模型服务响应超时")?
+        .map_err(|e| e.to_string())?;
+    let value: Value = serde_json::from_slice(&response).map_err(|_| "服务没有返回模型清单")?;
     let names: Vec<String> = value["data"]
         .as_array()
         .ok_or("服务未返回 OpenAI 兼容模型清单")?
@@ -121,6 +123,38 @@ impl Drop for ModelLink {
     }
 }
 
+// vLLM's CUDA platform indexes NVML by integer. CUDA's PCI bus order must
+// agree for every selected device, or an ordinal could target a different GPU.
+fn native_devices(inventory: &str, selected: &[String]) -> Result<String, String> {
+    let mut devices = Vec::new();
+    for line in inventory.lines() {
+        let fields: Vec<_> = line.split(',').map(str::trim).collect();
+        let [index, uuid, bus] = fields.as_slice() else {
+            return Err("无法解析 GPU 设备清单".into());
+        };
+        let index = index.parse::<usize>().map_err(|_| "GPU 序号无效")?;
+        devices.push((bus.to_ascii_lowercase(), *uuid, index));
+    }
+    devices.sort_by(|a, b| a.0.cmp(&b.0));
+    selected
+        .iter()
+        .map(|id| {
+            let (ordinal, (_, _, index)) = devices
+                .iter()
+                .enumerate()
+                .find(|(_, (_, uuid, _))| *uuid == id)
+                .ok_or_else(|| format!("找不到所选 GPU {id}"))?;
+            if ordinal != *index {
+                return Err(format!(
+                    "GPU {id} 的 CUDA 和 NVML 序号不同，无法确认原生 vLLM 分配"
+                ));
+            }
+            Ok(index.to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map(|v| v.join(","))
+}
+
 pub async fn start(
     r: &Runtime,
     c: &Config,
@@ -129,6 +163,10 @@ pub async fn start(
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let binary = binary(&c.native_binary)?;
+    let mut query = Command::new("nvidia-smi");
+    query.args(["--query-gpu=index,uuid,pci.bus_id", "--format=csv,noheader"]);
+    let inventory = crate::command::execute(query, None, 15).await?;
+    let devices = native_devices(&inventory, &c.gpu_uuids)?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", c.port))
         .await
         .map_err(|_| "模型端口被占用")?;
@@ -171,16 +209,30 @@ pub async fn start(
             "--property=TimeoutStopSec=15",
             &format!("--property=RuntimeDirectory=phyxi-vllm-{id}"),
             &format!("--setenv=HOME=/run/phyxi-vllm-{id}"),
+            "--setenv=USER=phyxi-vllm",
+            "--setenv=LOGNAME=phyxi-vllm",
             "--setenv=HF_HUB_OFFLINE=1",
             "--setenv=TRANSFORMERS_OFFLINE=1",
-            &format!("--setenv=CUDA_VISIBLE_DEVICES={}", c.gpu_uuids.join(",")),
+            "--setenv=CUDA_DEVICE_ORDER=PCI_BUS_ID",
+            &format!("--setenv=CUDA_VISIBLE_DEVICES={devices}"),
             "--",
         ])
         .arg(&binary);
         run
     } else {
+        use std::os::unix::fs::DirBuilderExt;
+        let home = r.data.join("vllm-home");
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&home)
+            .map_err(|e| format!("无法创建 vLLM 工作目录：{e}"))?;
         let mut cmd = Command::new(binary);
-        cmd.env("CUDA_VISIBLE_DEVICES", c.gpu_uuids.join(","))
+        cmd.env("HOME", home.canonicalize().map_err(|e| e.to_string())?)
+            .env("USER", "phyxi-vllm")
+            .env("LOGNAME", "phyxi-vllm");
+        cmd.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+            .env("CUDA_VISIBLE_DEVICES", &devices)
             .env("HF_HUB_OFFLINE", "1")
             .env("TRANSFORMERS_OFFLINE", "1");
         cmd

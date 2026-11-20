@@ -320,20 +320,10 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
     match kind {
         "models" => {
             let m: Model = decode(v.clone())?;
-            let c = Config {
-                source: m.source,
-                model_name: m.model_name,
-                model_path: m.model_path,
-                image: format!("vllm/vllm-openai@sha256:{}", "a".repeat(64)),
-                gpu_uuids: vec!["GPU-00000000-0000-0000-0000-000000000001".into()],
-                ..Config::default()
-            };
-            if let Some(s) = &c.source {
-                s.validate()?;
+            if let Some(source) = &m.source {
+                source.validate()?;
             }
-            let mut check = c;
-            check.source = None;
-            check.validate()?;
+            crate::config::validate_model(&m.model_name, &m.model_path)?;
         }
         "images" => {
             let image = decode::<Image>(v.clone())?;
@@ -343,38 +333,15 @@ fn validate(kind: &str, v: &Value) -> Result<(), String> {
             image_valid(&image.reference)?;
         }
         "runtimes" => {
-            let mut r: Parameters = decode(v.clone())?;
-            r.vllm.validate(r.max_model_len, r.max_num_seqs)?;
-            if r.engine != Engine::Vllm && !r.vllm.is_empty() {
-                return Err("vLLM 专属参数不能用于其他引擎".into());
-            }
-            // Runtime profiles have no GPU allocation yet. Validate PP above,
-            // then use PP=1 only for the synthetic single-GPU Config check.
-            r.vllm.parameters.remove("pipeline-parallel-size");
-            let c = Config {
-                engine: r.engine.clone(),
-                model_path: if r.engine == Engine::LlamaCpu {
-                    "/tmp/test.gguf".into()
-                } else {
-                    "/tmp/model".into()
-                },
-                image: format!("vllm/vllm-openai@sha256:{}", "a".repeat(64)),
-                gpu_uuids: if r.engine == Engine::LlamaCpu {
-                    vec![]
-                } else {
-                    vec!["GPU-00000000-0000-0000-0000-000000000001".into()]
-                },
-                max_model_len: r.max_model_len,
-                max_num_seqs: r.max_num_seqs,
-                gpu_memory_utilization: r.gpu_memory_utilization,
-                tool_parser: r.tool_parser,
-                reasoning_parser: r.reasoning_parser,
-                verify_tools: r.verify_tools,
-                verify_images: r.verify_images,
-                vllm: r.vllm,
-                ..Config::default()
-            };
-            c.validate()?;
+            let r: Parameters = decode(v.clone())?;
+            crate::config::validate_parameters(
+                &r.engine,
+                r.max_model_len,
+                r.max_num_seqs,
+                r.gpu_memory_utilization,
+                [&r.tool_parser, &r.reasoning_parser],
+                &r.vllm,
+            )?;
         }
         "deployments" => {
             let d: Deployment = decode(v.clone())?;

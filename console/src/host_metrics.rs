@@ -1,5 +1,5 @@
 //! Small, read-only host samples; unknown values stay null instead of becoming zero.
-use crate::runtime::execute;
+use crate::command::execute;
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::Path};
 use tokio::process::Command;

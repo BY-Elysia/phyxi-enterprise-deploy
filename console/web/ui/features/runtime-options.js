@@ -36,16 +36,16 @@ export function readVllm(form){
  return result;
 }
 export function addVllmEditor(data,{target,form,schema,button}){
- const section=document.createElement('section');section.id='vllm-options';section.className='vllm-options';
- const intro=document.createElement('p');intro.className='hint';intro.textContent='可选参数留空时沿用引擎默认。参数按 vLLM 0.11 文档校验；自定义镜像需确认版本支持，保存不代表 GPU 兼容性验证。';section.append(intro);
+ const section=document.createElement('details');section.id='vllm-options';section.className='vllm-options';
+ const heading=document.createElement('summary');heading.textContent='vLLM 启动参数';section.append(heading);
  const basic=document.createElement('div');basic.className='vllm-grid';section.append(basic);
- const advanced=document.createElement('details');advanced.className='vllm-advanced';const summary=document.createElement('summary');summary.textContent='高级参数 · 显存、调度、并行与模型适配';advanced.append(summary);section.append(advanced);
+ const advanced=document.createElement('details');advanced.className='vllm-advanced';const summary=document.createElement('summary');summary.textContent='高级参数';advanced.append(summary);section.append(advanced);
  const containers=new Map([['基础参数',basic]]);
  for(const spec of schema.filter(s=>!s.extension)){
   if(!containers.has(spec.group)){const heading=document.createElement('h3');heading.textContent=spec.group;advanced.append(heading);const grid=document.createElement('div');grid.className='vllm-grid';advanced.append(grid);containers.set(spec.group,grid);}
   containers.get(spec.group).append(vllmControl(spec,data.vllm?.parameters?.[spec.key]));
  }
- const extensions=document.createElement('details');extensions.className='vllm-advanced';const title=document.createElement('summary');title.textContent='扩展参数 · 受校验的附加选项';extensions.append(title);
+ const extensions=document.createElement('details');extensions.className='vllm-advanced';const title=document.createElement('summary');title.textContent='扩展参数';extensions.append(title);
  const hint=document.createElement('p');hint.className='hint';hint.textContent='从支持列表添加；名称、类型、范围和重复项均会校验。模型、端口、GPU、鉴权与启动命令由控制台管理。';extensions.append(hint);
  const rows=document.createElement('div');rows.dataset.vllmExtra='';extensions.append(rows);
  function addRow(key,value){
@@ -61,8 +61,7 @@ export function addVllmEditor(data,{target,form,schema,button}){
  const preview=document.createElement('details');preview.className='vllm-advanced';const pt=document.createElement('summary');pt.textContent='查看附加启动参数';const pre=document.createElement('pre');preview.append(pt,pre);section.append(preview);
  function updatePreview(){try{const v=readVllm(form),args=[];for(const [k,val] of Object.entries({...v.parameters,...v.extra})){args.push('--'+(val===false?'no-':'')+k);if(typeof val!=='boolean')args.push(typeof val==='object'?JSON.stringify(val):String(val));}pre.textContent=args.length?JSON.stringify(args,null,2):'未设置附加参数，沿用引擎默认。';}catch(e){pre.textContent=e.message;}}
  section.addEventListener('input',updatePreview);section.addEventListener('change',updatePreview);
- const firstHeading=target.querySelector('h3');if(firstHeading)firstHeading.textContent='基础参数';
- const parser=Array.from(target.querySelectorAll('h3')).find(h=>h.textContent==='解析器');target.insertBefore(section,parser||null);
+ target.append(section);
  const engine=form.elements.engine,previous=engine.onchange;
  function toggle(){const memory=form.elements.gpu_memory_utilization?.parentElement;if(memory)memory.firstChild.textContent=engine.value==='lmdeploy'?'KV 缓存占空闲显存比例':'显存使用比例';section.hidden=engine.value!=='vllm';for(const input of section.querySelectorAll('input,select,textarea'))input.disabled=section.hidden;updatePreview();}
  engine.onchange=()=>{previous?.();toggle();};toggle();

@@ -9,7 +9,7 @@
 ```bash
 cp .env.example .env
 # 编辑 .env：将 PHYXI_DATA_DIR 设置为现有状态目录的绝对路径
-mkdir -p /srv/phyxi/data  # 新安装时使用；已有目录无需创建
+# 新安装时，先创建上一步选定的数据目录
 # 确认旧的本机控制台已停止，再启动同一数据目录
 # macOS 使用 Colima 时先执行 colima start
 docker compose up -d --build

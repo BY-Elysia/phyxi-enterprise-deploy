@@ -1,5 +1,5 @@
 //! Host provisioning is a separate, fixed privileged operation; normal HTTP runs unprivileged.
-use crate::runtime::{execute, Runtime};
+use crate::{command::execute, runtime::Runtime};
 use serde::Serialize;
 use std::{fs, path::Path};
 use tokio::process::Command;

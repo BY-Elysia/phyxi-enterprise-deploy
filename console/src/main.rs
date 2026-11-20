@@ -4,10 +4,15 @@ mod artifacts;
 mod backup;
 mod catalog;
 mod catalog_api;
+mod certificate_api;
+mod command;
+mod docker;
+mod gateway_api;
 mod vllm;
+mod workspace_api;
 use catalog_api::{
     catalog_delete, catalog_get, catalog_put, deployment_preview, image_status, resolve_action,
-    workspace_export, Scope,
+    Scope,
 };
 mod config;
 mod download_progress;
@@ -177,25 +182,25 @@ fn router(app: App) -> Router {
         )
         .route(
             "/workspaces/{id}/requests",
-            get(catalog_api::workspace_requests),
+            get(workspace_api::workspace_requests),
         )
         .route(
             "/workspaces/{id}/credential",
-            get(catalog_api::credential_status).post(catalog_api::credential_change),
+            get(workspace_api::credential_status).post(workspace_api::credential_change),
         )
         .route(
             "/gateways/{id}/certificate",
-            get(catalog_api::certificate_status)
-                .post(catalog_api::certificate_upload)
+            get(certificate_api::certificate_status)
+                .post(certificate_api::certificate_upload)
                 .layer(axum::extract::DefaultBodyLimit::max(220000)),
         )
         .route(
             "/gateways/{id}/readiness",
-            get(catalog_api::gateway_readiness),
+            get(gateway_api::gateway_readiness),
         )
         .route(
             "/gateways/{id}/csr",
-            get(catalog_api::csr_download).post(catalog_api::csr_create),
+            get(certificate_api::csr_download).post(certificate_api::csr_create),
         )
         .route(
             "/audit",
@@ -212,7 +217,10 @@ fn router(app: App) -> Router {
             axum::routing::put(catalog_put).delete(catalog_delete),
         )
         .route("/deployments/{id}/preview", get(deployment_preview))
-        .route("/workspaces/{id}/export", get(workspace_export))
+        .route(
+            "/workspaces/{id}/export",
+            get(workspace_api::workspace_export),
+        )
         .route("/images/{id}/status", get(image_status))
         .route("/images/local", get(catalog_api::local_images))
         .route("/config", get(config_get).put(config_save))
@@ -661,7 +669,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         println!("加密备份完成（不含权重与登录会话）。");
         return Ok(());
     }
-    let host = std::env::var("PHYXI_DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
+    let host = crate::docker::host();
     if !host.starts_with("unix:///") {
         return Err("首版仅支持本地 Unix Docker socket".into());
     }

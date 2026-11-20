@@ -9,8 +9,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-fn model_roots(data: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![data.join("models"), PathBuf::from("/srv/phyxi/models")];
+fn configured_model_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
     if let Some(value) = std::env::var_os("PHYXI_MODEL_ROOTS") {
         for path in std::env::split_paths(&value) {
             if path.is_absolute()
@@ -39,12 +39,15 @@ fn existing_path(path: &Path) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
-fn configured_path(data: &Path, path: &Path) -> bool {
-    model_roots(data)
-        .iter()
+fn existing_model_roots(data: &Path) -> impl Iterator<Item = PathBuf> {
+    std::iter::once(data.join("models"))
+        .chain(configured_model_roots())
         .filter_map(|root| fs::canonicalize(root).ok())
         .filter(|root| root.parent().is_some())
-        .any(|root| path.starts_with(root))
+}
+
+fn configured_path(data: &Path, path: &Path) -> bool {
+    existing_model_roots(data).any(|root| path.starts_with(root))
 }
 
 fn authorized_path(data: &Path, path: &Path, store: &Store) -> Result<(PathBuf, bool), String> {
@@ -123,22 +126,54 @@ pub struct Browse {
 }
 
 pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
-    let configured = model_roots(data);
-    let roots: Vec<_> = configured
-        .iter()
-        .map(|path| serde_json::json!({"path":path,"available":path.is_dir(),"kind":"configured"}))
-        .chain(
-            model_storage::storage_roots(data)
-                .into_iter()
-                .filter(|path| !configured.contains(path))
-                .map(|path| serde_json::json!({"path":path,"available":true,"kind":"storage"})),
-        )
-        .collect();
+    let filesystem_root = query.root.as_deref() == Some("/");
+    let roots: Vec<_> = if filesystem_root {
+        Vec::new()
+    } else {
+        let configured = configured_model_roots();
+        configured
+            .iter()
+            .map(|path| serde_json::json!({"path":path,"available":path.is_dir(),"kind":"configured"}))
+            .chain(
+                model_storage::storage_roots(data)
+                    .into_iter()
+                    .filter(|path| !configured.contains(path))
+                    .map(|path| serde_json::json!({"path":path,"available":true,"kind":"storage"})),
+            )
+            .collect()
+    };
     let Some(root) = query.root else {
         return Ok(serde_json::json!({"roots":roots,"entries":[]}));
     };
-    let root = selected_root(data, &root)?;
-    let path = root.resolve(data, Path::new(query.path.as_deref().unwrap_or(".")))?;
+    let (root, model_roots) = if filesystem_root {
+        (
+            BrowseRoot {
+                path: PathBuf::from("/"),
+                configured: false,
+            },
+            existing_model_roots(data).collect::<Vec<_>>(),
+        )
+    } else {
+        (selected_root(data, &root)?, Vec::new())
+    };
+    let can_browse = |path: &Path| {
+        path == Path::new("/")
+            || model_storage::model_location(data, path)
+            || model_roots
+                .iter()
+                .any(|model_root| path.starts_with(model_root) || model_root.starts_with(path))
+    };
+    let resolve = |path: &Path| {
+        if !filesystem_root {
+            return root.resolve(data, path);
+        }
+        let target = beneath(&root.path, path)?;
+        if !can_browse(&root.path.join(path)) || !can_browse(&target) {
+            return Err("该位置不属于可浏览的模型存储目录".into());
+        }
+        Ok(target)
+    };
+    let path = resolve(Path::new(query.path.as_deref().unwrap_or(".")))?;
     let mut entries = Vec::new();
     let mut scan_limit_reached = false;
     let directory = fs::read_dir(&path).map_err(|_| "无法读取这个目录")?;
@@ -156,11 +191,11 @@ pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
         else {
             continue;
         };
-        let Ok(target) = root.resolve(data, &entry.path()) else {
+        let Ok(target) = resolve(&entry.path()) else {
             continue;
         };
         let directory = target.is_dir();
-        if directory || (target.is_file() && name.ends_with(".gguf")) {
+        if (directory && target != path) || (target.is_file() && name.ends_with(".gguf")) {
             entries.push((!directory, name, target));
         }
     }
@@ -176,8 +211,12 @@ pub fn browse(data: &Path, query: Browse) -> Result<Value, String> {
     let parent = path
         .parent()
         .filter(|parent| parent.starts_with(&root.path));
+    let selectable = path.join("config.json").is_file()
+        && (!filesystem_root
+            || model_storage::model_location(data, &path)
+            || model_roots.iter().any(|root| path.starts_with(root)));
     Ok(
-        serde_json::json!({"roots":roots,"path":path,"parent":parent,"entries":entries,"truncated":truncated}),
+        serde_json::json!({"roots":roots,"path":path,"parent":parent,"entries":entries,"truncated":truncated,"selectable":selectable}),
     )
 }
 

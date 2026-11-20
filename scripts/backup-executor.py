@@ -2,12 +2,20 @@
 """Manual encrypted backup of both executor state and separate console credentials."""
 import argparse,getpass,json,os,pathlib,subprocess,time
 p=argparse.ArgumentParser()
-p.add_argument('--data-dir',type=pathlib.Path,default=pathlib.Path('/srv/phyxi/data'))
-p.add_argument('--auth-dir',type=pathlib.Path,default=pathlib.Path('/srv/phyxi/console-auth'))
+p.add_argument('--data-dir',type=pathlib.Path)
+p.add_argument('--auth-dir',type=pathlib.Path)
 p.add_argument('--output',type=pathlib.Path,required=True,help='New directory for two encrypted archives')
 a=p.parse_args()
 if os.geteuid()!=0:p.error('Run as root')
 if a.output.exists():p.error('Output must be a new directory')
+if a.data_dir is None:
+    config=pathlib.Path('/etc/phyxi/executor.env')
+    if not config.is_file():p.error('Supply --data-dir or install the executor first')
+    settings=dict(line.split('=',1) for line in config.read_text().splitlines() if '=' in line)
+    if not settings.get('PHYXI_STATE_DIR'):p.error('Executor configuration has no PHYXI_STATE_DIR')
+    a.data_dir=pathlib.Path(settings['PHYXI_STATE_DIR'])
+if a.auth_dir is None:
+    a.auth_dir=a.data_dir.parent/'console-auth'
 for d in [a.data_dir,a.auth_dir]:
     if not d.is_absolute() or not d.is_dir():p.error('State directories must exist and be absolute')
 # Never interrupt a deployment/installation just to take a backup.

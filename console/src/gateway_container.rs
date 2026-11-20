@@ -1,8 +1,8 @@
 //! Optional externally owned Nginx process. Never create/remove arbitrary containers.
 use crate::{
+    command::execute,
     config::Config,
     gateway::{Gateway, GatewayConfig},
-    runtime::execute,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -23,20 +23,8 @@ pub fn name() -> Option<String> {
 }
 
 async fn docker(args: &[String]) -> Result<String, String> {
-    let host = std::env::var("PHYXI_DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into());
-    let mut command = Command::new("docker");
-    for k in [
-        "DOCKER_HOST",
-        "DOCKER_CONTEXT",
-        "DOCKER_TLS_VERIFY",
-        "DOCKER_TLS",
-        "DOCKER_API_VERSION",
-        "DOCKER_CERT_PATH",
-        "DOCKER_CONFIG",
-    ] {
-        command.env_remove(k);
-    }
-    command.arg("--host").arg(host).args(args);
+    let host = crate::docker::host();
+    let command = crate::docker::command(&host, args);
     execute(command, None, 15).await
 }
 

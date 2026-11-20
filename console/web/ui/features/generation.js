@@ -9,7 +9,7 @@ const generationFields=[
 export function addGenerationEditor(data,{target,button}){
  const section=document.createElement('section');section.id='generation-editor';section.className='vllm-options';
  const title=document.createElement('h3');title.className='form-section-title';title.textContent='生成预设 · 每次请求';
- const hint=document.createElement('p');hint.className='hint';hint.textContent='留空沿用服务默认。导出后由客户端随请求发送，可逐次覆盖；保存无需重新部署模型，也不会由网关强制注入。';section.append(title,hint);
+ const hint=document.createElement('p');hint.className='hint';hint.textContent='留空使用引擎默认值。导出后由客户端随请求发送。';section.append(title,hint);
  const grid=document.createElement('div');grid.className='vllm-grid';section.append(grid);
  for(const [key,label,min,max,step,help] of generationFields){
   const field=document.createElement('label');field.textContent=label+' · '+key;

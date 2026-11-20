@@ -1,9 +1,5 @@
 //! Optional, console-owned support containers. No other workload may be adopted.
-use crate::{
-    gateway::Gateway,
-    runtime::{execute, Runtime},
-    store::Store,
-};
+use crate::{command::execute, gateway::Gateway, runtime::Runtime, store::Store};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -19,24 +15,8 @@ const OWNER: &str = "io.phyxi.console.owner";
 pub fn enabled() -> bool {
     std::env::var("PHYXI_MANAGED_SERVICES").as_deref() == Ok("1")
 }
-fn command(r: &Runtime, args: &[String]) -> Command {
-    let mut c = Command::new("docker");
-    for k in [
-        "DOCKER_HOST",
-        "DOCKER_CONTEXT",
-        "DOCKER_TLS_VERIFY",
-        "DOCKER_TLS",
-        "DOCKER_API_VERSION",
-        "DOCKER_CERT_PATH",
-        "DOCKER_CONFIG",
-    ] {
-        c.env_remove(k);
-    }
-    c.args(["--host", &r.docker_host]).args(args);
-    c
-}
 async fn docker(r: &Runtime, args: &[String]) -> Result<String, String> {
-    execute(command(r, args), None, 30).await
+    execute(crate::docker::command(&r.docker_host, args), None, 30).await
 }
 async fn inspect(r: &Runtime, name: &str) -> Result<Option<Value>, String> {
     let names = docker(
@@ -98,11 +78,7 @@ pub async fn status(r: &Runtime) -> Result<Value, String> {
 pub async fn absent(g: &Gateway) -> Result<bool, String> {
     let data = g.dir.parent().ok_or("状态目录无效")?.to_path_buf();
     let owner = fs::read_to_string(data.join("owner")).map_err(|e| e.to_string())?;
-    let r = Runtime::new(
-        owner.trim().into(),
-        std::env::var("PHYXI_DOCKER_HOST").unwrap_or("unix:///var/run/docker.sock".into()),
-        data,
-    );
+    let r = Runtime::new(owner.trim().into(), crate::docker::host(), data);
     Ok(inspect(&r, GATEWAY)
         .await?
         .is_none_or(|v| v["State"]["Running"] != true))
